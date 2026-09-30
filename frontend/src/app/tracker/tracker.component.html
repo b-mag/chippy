@@ -1,7 +1,6 @@
 <div class="workspace" (keydown)="onKey($event)" tabindex="0">
   <header class="top">
     <div class="top-left">
-      <h1 class="wordmark">CHIPPY</h1>
       <label>Chip
         <select [value]="project().chip" [attr.data-epoch]="chipSelectEpoch()" (change)="chipChange(($any($event.target)).value)">
           @for (id of chips; track id) {
@@ -38,13 +37,6 @@
         <input type="file" accept=".json,application/json" (change)="open(($any($event.target)).files?.[0])" />
       </label>
       <button type="button" (click)="exportOpen.set(!exportOpen())">Export</button>
-      <label class="paint">Paint
-        <select [value]="aesthetics.current()" (change)="aesthetic(($any($event.target)).value)">
-          @for (choice of aesthetics.choices; track choice) {
-            <option [value]="choice">{{ choice }}</option>
-          }
-        </select>
-      </label>
     </div>
   </header>
 

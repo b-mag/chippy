@@ -16,7 +16,7 @@ describe('aesthetic', () => {
     expect(again.read(storage)).toBe('dark');
   });
 
-  it('falls back to vaporwave for an unknown paint choice', () => {
+  it('falls back to vaporwave for an unknown theme choice', () => {
     const store = new Map<string, string>();
     const storage = {
       getItem: (key: string) => store.get(key) ?? null,

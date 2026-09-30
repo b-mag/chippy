@@ -25,8 +25,8 @@ import {
   type InstrumentPreset,
   type Project,
 } from '@chippy/domain';
-import { AestheticService } from '../aesthetic.service';
 import { PlaybackService, type LoopMode } from '../playback.service';
+import { RadioPlayerService } from '../radio/radio-player.service';
 import { SessionService } from '../session.service';
 import { SupportEntitlementService } from '../support-entitlement.service';
 
@@ -41,8 +41,8 @@ export class TrackerComponent {
   readonly session = inject(SessionService);
   readonly columns: ColumnId[] = ['note', 'instrument', 'volume'];
   private readonly playback = inject(PlaybackService);
+  private readonly radio = inject(RadioPlayerService);
   private readonly http = inject(HttpClient);
-  readonly aesthetics = inject(AestheticService);
   private readonly entitlement = inject(SupportEntitlementService);
   private readonly renameInput = viewChild<ElementRef<HTMLInputElement>>('renameInput');
   private readonly instrumentRenameInput = viewChild<ElementRef<HTMLInputElement>>('instrumentRenameInput');
@@ -262,6 +262,7 @@ export class TrackerComponent {
   }
 
   play(fromCursor: boolean): void {
+    this.radio.stop();
     const state = this.state();
     this.playback.play(
       songForRender(state.project),
@@ -483,12 +484,6 @@ export class TrackerComponent {
     link.download = filename;
     link.click();
     URL.revokeObjectURL(url);
-  }
-
-  aesthetic(id: string): void {
-    if (id === 'vaporwave' || id === 'dark' || id === 'plain') {
-      this.aesthetics.select(id);
-    }
   }
 
   sessionName(value: string): void {

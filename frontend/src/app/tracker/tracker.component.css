@@ -1,12 +1,12 @@
-app-tracker { display: block; height: 100%; }
+:host { display: block; height: 100%; min-height: 0; }
 
 .workspace {
   display: grid;
   grid-template-columns: 14rem minmax(0, 1fr) 16rem;
   grid-template-rows: auto minmax(0, 1fr) auto auto;
   gap: 12px;
-  height: 100vh;
-  padding: 12px;
+  height: 100%;
+  min-height: 0;
   outline: none;
 }
 

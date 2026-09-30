@@ -19,7 +19,7 @@ export class AestheticService {
     this.apply(id, localStorage, document.documentElement);
   }
 
-  /** Applies the paint token and remembers it. Used by the unit test with fakes. */
+  /** Applies the theme token and remembers it. Used by the unit test with fakes. */
   apply(id: AestheticId, storage: Pick<Storage, 'getItem' | 'setItem'>, root: { dataset: DOMStringMap }): void {
     const choice = CHOICES.includes(id) ? id : 'vaporwave';
     root.dataset['aesthetic'] = choice;

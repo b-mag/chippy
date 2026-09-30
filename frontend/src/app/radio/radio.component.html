@@ -1,0 +1,41 @@
+<section class="radio" [class.on-air]="radio.playing()" aria-label="Chippy Radio">
+  <div class="haze" aria-hidden="true"></div>
+  <div class="dial-marks" aria-hidden="true"></div>
+
+  <div class="stage">
+    <p class="plate">CHIPPY · FM NIGHT</p>
+
+    <div class="glass">
+      <div class="readout">
+        <span class="on-air-lamp" [class.lit]="radio.playing()" aria-hidden="true"></span>
+        <div class="readout-text">
+          <span class="station">{{ radio.station().label }}</span>
+          <span class="track">{{ radio.trackTitle() || radio.status() }}</span>
+        </div>
+      </div>
+      <canvas #viz class="viz" width="640" height="160" aria-hidden="true"></canvas>
+    </div>
+
+    <div class="presets" role="group" aria-label="Station presets">
+      @for (station of radio.stations; track station.id; let index = $index) {
+        <button
+          type="button"
+          class="preset"
+          [class.active]="radio.stationId() === station.id"
+          (click)="selectPreset(station.id)">
+          <span class="preset-num">{{ index + 1 }}</span>
+          <span class="preset-name">{{ station.shortLabel }}</span>
+        </button>
+      }
+    </div>
+
+    <div class="transport">
+      <button type="button" class="power" [attr.aria-pressed]="radio.playing()" (click)="togglePower()">
+        {{ radio.playing() ? 'Stop' : 'Play' }}
+      </button>
+      <a class="credit" [href]="radio.station().homepage" target="_blank" rel="noopener noreferrer">
+        Station site
+      </a>
+    </div>
+  </div>
+</section>
