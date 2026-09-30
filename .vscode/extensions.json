@@ -1,0 +1,8 @@
+{
+  "recommendations": [
+    "angular.ng-template",
+    "dbaeumer.vscode-eslint",
+    "vscjava.vscode-java-pack",
+    "editorconfig.editorconfig"
+  ]
+}

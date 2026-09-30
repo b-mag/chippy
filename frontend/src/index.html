@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en" data-aesthetic="vaporwave">
+  <head>
+    <meta charset="utf-8" />
+    <title>Chippy</title>
+    <base href="/" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect fill='%23140e22' width='16' height='16'/%3E%3Cpath d='M2 12 L8 3 L14 12' fill='none' stroke='%237af0ff' stroke-width='1.4'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="splash.css" data-beasties-skip />
+  </head>
+  <body>
+    <div id="splash" class="splash" hidden>
+      <canvas id="splash-canvas" aria-hidden="true"></canvas>
+      <p class="splash-skip">Click or press a key to skip</p>
+    </div>
+    <app-root></app-root>
+    <!-- After the canvas so this file can find it. The Angular module stays deferred and loads in parallel. -->
+    <script src="splash.js"></script>
+  </body>
+</html>

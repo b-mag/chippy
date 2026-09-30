@@ -1,0 +1,32 @@
+{
+  "name": "chippy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node ./node_modules/@angular/cli/bin/ng.js serve --proxy-config proxy.conf.json --port 4200",
+    "build": "node ./node_modules/@angular/cli/bin/ng.js build",
+    "test": "node ./node_modules/vitest/vitest.mjs run",
+    "lint": "node ./node_modules/eslint/bin/eslint.js ."
+  },
+  "dependencies": {
+    "@angular/common": "^22.2.0",
+    "@angular/compiler": "^22.2.0",
+    "@angular/core": "^22.2.0",
+    "@angular/forms": "^22.2.0",
+    "@angular/platform-browser": "^22.2.0",
+    "@angular/router": "^22.2.0",
+    "rxjs": "^7.8.2",
+    "tslib": "^2.8.1"
+  },
+  "devDependencies": {
+    "@angular/build": "^22.2.0",
+    "@angular/cli": "^22.2.0",
+    "@angular/compiler-cli": "^22.2.0",
+    "@eslint/js": "^9.39.0",
+    "eslint": "^9.39.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^4.0.18"
+  }
+}

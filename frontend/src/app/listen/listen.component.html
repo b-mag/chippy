@@ -1,0 +1,29 @@
+<section class="listen">
+  <header>
+    <a routerLink="/">Back to the song</a>
+    <h1 class="wordmark">SNIP</h1>
+  </header>
+  <label>YM file
+    <input type="file" accept=".ym,application/octet-stream" (change)="open(($any($event.target)).files?.[0])" />
+  </label>
+  <p role="status">{{ status() }}</p>
+  <canvas
+    #timeline
+    class="timeline"
+    (pointerdown)="pointerDown($event)"
+    (pointermove)="pointerMove($event)"
+    (pointerup)="pointerUp()"
+    (pointercancel)="pointerUp()"></canvas>
+  <label>Start
+    <input type="number" min="0" [max]="end()" [value]="start()" (change)="start.set(+$any($event.target).value); draw()" />
+  </label>
+  <label>End
+    <input type="number" [min]="start()" [value]="end()" (change)="end.set(+$any($event.target).value); draw()" />
+  </label>
+  <label>Name
+    <input [value]="snipName()" (input)="snipName.set($any($event.target).value)" />
+  </label>
+  <button type="button" (click)="play()">Play range</button>
+  <button type="button" (click)="stop()">Stop</button>
+  <button type="button" (click)="keep()">Use in this song</button>
+</section>

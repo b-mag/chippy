@@ -1,0 +1,104 @@
+:root,
+[data-aesthetic='vaporwave'] {
+  --sky: #140c24;
+  --horizon: #ff4d9a;
+  --sun-top: #ffe1a8;
+  --magenta: #ff3ec8;
+  --cyan: #79f6ff;
+  --ink: #f6f1ff;
+  --muted: #c7b8de;
+  --cell: #160f28;
+  --cell-edge: #3a2a55;
+  --chrome: rgba(18, 10, 32, 0.88);
+  --cursor: #79f6ff;
+  --playhead: #ff3ec8;
+  --danger: #ffb4a8;
+  --wordmark: 'Segoe UI', sans-serif;
+}
+
+[data-aesthetic='dark'] {
+  --sky: #121417;
+  --horizon: #121417;
+  --sun-top: #121417;
+  --magenta: #d7dbe2;
+  --cyan: #9ec1ff;
+  --ink: #f2f4f7;
+  --muted: #b7c0cc;
+  --cell: #1b1f26;
+  --cell-edge: #303742;
+  --chrome: #16191e;
+  --cursor: #9ec1ff;
+  --playhead: #f0a38a;
+  --danger: #ffb4a8;
+  --wordmark: 'Segoe UI', sans-serif;
+}
+
+[data-aesthetic='plain'] {
+  --sky: #f4f1ea;
+  --horizon: #f4f1ea;
+  --sun-top: #f4f1ea;
+  --magenta: #6b3f16;
+  --cyan: #1d4e89;
+  --ink: #1c1b19;
+  --muted: #5c574e;
+  --cell: #fffdf8;
+  --cell-edge: #ddd6c8;
+  --chrome: #fffdf8;
+  --cursor: #1d4e89;
+  --playhead: #b45309;
+  --danger: #9f1239;
+  --wordmark: 'Segoe UI', sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  color: var(--ink);
+  font: 15px/1.4 "Segoe UI", sans-serif;
+  background:
+    linear-gradient(180deg, transparent 0 42%, var(--horizon) 78%, var(--sky) 78% 100%),
+    radial-gradient(circle at 50% 38%, var(--sun-top), transparent 18%),
+    linear-gradient(180deg, var(--sky), #241038 70%);
+}
+
+[data-aesthetic='dark'] body,
+[data-aesthetic='plain'] body,
+[data-aesthetic='dark'],
+[data-aesthetic='plain'] {
+  background: var(--sky);
+}
+
+body {
+  min-height: 100%;
+}
+
+button, input, select {
+  font: inherit;
+  color: inherit;
+  background: var(--cell);
+  border: 1px solid var(--cell-edge);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+button { cursor: pointer; }
+button:focus-visible, input:focus-visible, select:focus-visible, [role='gridcell']:focus-visible {
+  outline: 2px solid var(--cursor);
+  outline-offset: 2px;
+}
+
+.wordmark {
+  font-family: var(--wordmark);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  margin: 0;
+}
+
+[data-aesthetic='vaporwave'] .wordmark {
+  background: linear-gradient(90deg, var(--sun-top), var(--magenta), var(--cyan));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}

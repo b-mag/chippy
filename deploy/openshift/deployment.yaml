@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chippy
+  labels:
+    app: chippy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chippy
+  template:
+    metadata:
+      labels:
+        app: chippy
+    spec:
+      containers:
+        - name: chippy
+          image: chippy:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+          env:
+            - name: CHIPPY_SPLASH_ENABLED
+              value: "true"

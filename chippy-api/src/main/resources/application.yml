@@ -1,0 +1,11 @@
+server:
+  port: 8080
+spring:
+  servlet:
+    multipart:
+      max-file-size: 8MB
+      max-request-size: 8MB
+# Turn the opening animation off without a rebuild: CHIPPY_SPLASH_ENABLED=false
+chippy:
+  splash:
+    enabled: true

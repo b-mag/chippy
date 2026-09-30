@@ -1,0 +1,35 @@
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: #120a22;
+  color: #f4f0ff;
+}
+
+.splash[hidden] {
+  display: none;
+}
+
+.splash canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.splash-skip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 28px;
+  text-align: center;
+  font: 14px ui-monospace, monospace;
+  letter-spacing: 0.08em;
+}
+
+.splash-leave {
+  animation: splash-out 280ms ease forwards;
+}
+
+@keyframes splash-out {
+  to { opacity: 0; }
+}

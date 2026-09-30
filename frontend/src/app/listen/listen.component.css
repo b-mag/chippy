@@ -1,0 +1,19 @@
+.listen {
+  display: grid;
+  gap: 12px;
+  max-width: 60rem;
+  margin: 24px auto;
+  padding: 16px;
+  background: var(--chrome);
+  border: 1px solid var(--cell-edge);
+  border-radius: 12px;
+}
+
+.timeline {
+  width: 100%;
+  height: 80px;
+  background: var(--cell);
+  border-radius: 8px;
+}
+
+.listen > header { display: flex; justify-content: space-between; align-items: center; }

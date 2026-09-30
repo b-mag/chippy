@@ -1,0 +1,12 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: chippy
+spec:
+  to:
+    kind: Service
+    name: chippy
+  port:
+    targetPort: http
+  tls:
+    termination: edge

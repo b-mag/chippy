@@ -1,0 +1,50 @@
+# Working plans stay on this machine.
+/plan/
+
+# Build logs
+/logs/
+
+# Local JDKs and Maven used by the scripts
+/.tools/
+
+# Java
+**/target/
+*.class
+*.jar
+*.war
+*.ear
+hs_err_pid*
+
+# Angular
+**/node_modules/
+**/dist/
+**/.angular/
+**/out-tsc/
+**/*.tsbuildinfo
+**/.eslintcache
+frontend/coverage/
+npm-debug.log*
+
+# Local screen captures
+/screenshots/
+
+# Secrets and local overrides
+.env
+**/.env
+**/application-local.yml
+**/application-local.properties
+
+# Editors and OS
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Maven wrapper jar is tracked; local maven repo is not
+.m2/
