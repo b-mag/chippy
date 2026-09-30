@@ -3,6 +3,7 @@
  * all import this barrel and nothing underneath it.
  */
 export {
+  LEGACY_PROJECT_VERSION,
   PATTERN_ROWS,
   PROJECT_VERSION,
   type Cell,
@@ -12,31 +13,71 @@ export {
   type Instrument,
   type InstrumentKind,
   type Pattern,
+  type Project,
   type Song,
+  type SongBody,
 } from './lib/types';
 export {
   type ChipDefinition,
   type InstrumentField,
+  auditionChannelId,
+  auditionChannelIndex,
   chipDefinition,
   chipIds,
 } from './lib/chips';
-export { emptyCell, newSong } from './lib/song-factory';
+export {
+  activeSongBody,
+  blankSongBody,
+  emptyCell,
+  newProject,
+  newSong,
+  songForRender,
+  withActiveSong,
+} from './lib/song-factory';
+export {
+  INSTRUMENT_PRESETS,
+  instrumentFromPreset,
+  presetsForChip,
+  type InstrumentPreset,
+} from './lib/presets';
 export {
   addInstrument,
+  addInstrumentFromPreset,
   addPattern,
+  addRandomPattern,
   addSnipInstrument,
+  addSong,
   armInstrument,
   armedInstrument,
+  changeInstrumentKind,
+  clearPattern,
   confirmationAccepted,
+  deleteInstrument,
+  duplicateBaseName,
+  duplicatePattern,
+  followPlaybackOrder,
   formatNote,
+  loadProject,
   loadSong,
+  markClean,
+  newProjectForChip,
   newSession,
+  nextBlankPatternName,
+  nextDuplicatePatternName,
   noteFromKey,
+  patternDisplayName,
+  removeOrderEntry,
+  removeSong,
+  renameInstrument,
+  renamePattern,
+  reorderOrder,
   replaceWithRandom,
   selectOrder,
+  selectSong,
   setChip,
   setName,
   setOctave,
+  setSongName,
   setTempo,
   updateInstrument,
   type SessionState,
@@ -49,4 +90,4 @@ export {
   setVolume,
   undo,
 } from './lib/session';
-export { randomSong } from './lib/random-song';
+export { fillPatternRandom, randomProject, randomSong } from './lib/random-song';

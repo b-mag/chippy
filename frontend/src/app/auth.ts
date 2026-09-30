@@ -4,12 +4,18 @@ import { CanActivateFn } from '@angular/router';
 /** Ready for a real sign-in later. Phase 1 allows every route. */
 export abstract class AuthService {
   abstract canActivate(): boolean;
+  /** Donors later skip ads. Anonymous users never have the perk. */
+  abstract hasSupportPerk(): boolean;
 }
 
 @Injectable({ providedIn: 'root' })
 export class AnonymousAuthService extends AuthService {
   canActivate(): boolean {
     return true;
+  }
+
+  hasSupportPerk(): boolean {
+    return false;
   }
 }
 

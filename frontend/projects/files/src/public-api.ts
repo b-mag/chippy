@@ -1,7 +1,7 @@
 export { parseProject, serializeProject, downloadName } from './lib/project-file';
 export { encodeYm6, parseYm, type ParsedYm } from './lib/ym6';
 export { encodeVgm } from './lib/vgm';
-export { encodeWav, renderPcm } from './lib/pcm';
+export { a4Hz, a4Period, encodeWav, renderPcm } from './lib/pcm';
 export { AkyUnsupportedError, encodeAky } from './lib/aky';
 
 import { renderSong } from '@chippy/engines';

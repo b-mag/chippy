@@ -1,28 +1,48 @@
 import { Injectable, signal } from '@angular/core';
 import {
+  activeSongBody,
   addInstrument,
+  addInstrumentFromPreset,
   addPattern,
+  addRandomPattern,
   addSnipInstrument,
+  addSong,
   armInstrument,
+  changeInstrumentKind,
   clearCell,
+  clearPattern,
+  deleteInstrument,
+  duplicatePattern,
   enterCut,
   enterNote,
-  loadSong,
+  followPlaybackOrder,
+  loadProject,
+  markClean,
   moveCursor,
+  newProjectForChip,
   newSession,
   redo,
-  replaceWithRandom,
+  removeOrderEntry,
+  removeSong,
+  renameInstrument,
+  renamePattern,
+  reorderOrder,
   selectOrder,
-  setChip,
+  selectSong,
   setName,
   setOctave,
+  setSongName,
   setTempo,
   setVolume,
+  songForRender,
   undo,
   updateInstrument,
   type ChipId,
   type ColumnId,
   type Instrument,
+  type InstrumentKind,
+  type InstrumentPreset,
+  type Project,
   type SessionState,
   type Song,
 } from '@chippy/domain';
@@ -33,6 +53,15 @@ export class SessionService {
 
   snapshot(): SessionState {
     return this.state();
+  }
+
+  /** Active song flat view for playback and export. */
+  song(): Song {
+    return songForRender(this.state().project);
+  }
+
+  activeBody() {
+    return activeSongBody(this.state().project);
   }
 
   enterNote(midi: number): void {
@@ -67,28 +96,73 @@ export class SessionService {
     this.state.update((state) => redo(state));
   }
 
-  setChip(chip: ChipId): void {
-    this.state.update((state) => setChip(state, chip));
+  /** Wipe and start a blank project for the chip (after user confirm). */
+  newProjectForChip(chip: ChipId): void {
+    this.state.update((state) => newProjectForChip(state, chip));
   }
 
   addPattern(): void {
     this.state.update((state) => addPattern(state));
   }
 
+  duplicatePattern(): void {
+    this.state.update((state) => duplicatePattern(state));
+  }
+
+  addRandomPattern(seed = Math.floor(Math.random() * 1_000_000)): void {
+    this.state.update((state) => addRandomPattern(state, seed));
+  }
+
+  clearPattern(): void {
+    this.state.update((state) => clearPattern(state));
+  }
+
+  removePattern(): void {
+    this.state.update((state) => removeOrderEntry(state));
+  }
+
+  renamePattern(id: string, name: string): void {
+    this.state.update((state) => renamePattern(state, id, name));
+  }
+
+  reorderOrder(fromIndex: number, toIndex: number): void {
+    this.state.update((state) => reorderOrder(state, fromIndex, toIndex));
+  }
+
   selectOrder(index: number): void {
     this.state.update((state) => selectOrder(state, index));
+  }
+
+  followPlayback(orderIndex: number, row: number): void {
+    this.state.update((state) => followPlaybackOrder(state, orderIndex, row));
   }
 
   updateInstrument(id: string, patch: Partial<Instrument>): void {
     this.state.update((state) => updateInstrument(state, id, patch));
   }
 
+  renameInstrument(id: string, name: string): void {
+    this.state.update((state) => renameInstrument(state, id, name));
+  }
+
+  changeInstrumentKind(id: string, kind: InstrumentKind): void {
+    this.state.update((state) => changeInstrumentKind(state, id, kind));
+  }
+
+  deleteInstrument(id: string): void {
+    this.state.update((state) => deleteInstrument(state, id));
+  }
+
   arm(id: string): void {
     this.state.update((state) => armInstrument(state, id));
   }
 
-  addInstrument(): void {
-    this.state.update((state) => addInstrument(state));
+  addInstrument(kind?: InstrumentKind): void {
+    this.state.update((state) => addInstrument(state, kind));
+  }
+
+  addFromPreset(preset: InstrumentPreset): void {
+    this.state.update((state) => addInstrumentFromPreset(state, preset));
   }
 
   tempo(value: number): void {
@@ -99,24 +173,38 @@ export class SessionService {
     this.state.update((state) => setName(state, value));
   }
 
+  songName(value: string): void {
+    this.state.update((state) => setSongName(state, value));
+  }
+
+  selectSong(id: string): void {
+    this.state.update((state) => selectSong(state, id));
+  }
+
+  addSong(): void {
+    this.state.update((state) => addSong(state));
+  }
+
+  removeSong(): void {
+    this.state.update((state) => removeSong(state));
+  }
+
   octave(value: number): void {
     this.state.update((state) => setOctave(state, value));
   }
 
-  random(seed: number, typed: string): boolean {
-    const before = this.state().song;
-    this.state.update((state) => replaceWithRandom(state, seed, typed));
-    return this.state().song !== before;
+  load(project: Project): void {
+    this.state.update((state) => loadProject(state, project));
   }
 
-  load(song: Song): void {
-    this.state.update((state) => loadSong(state, song));
+  markClean(): void {
+    this.state.update((state) => markClean(state));
   }
 
   commitSnip(name: string, frames: number[][]): void {
     this.state.update((state) => {
-      const added = addSnipInstrument(state.song, name, frames);
-      return { ...state, song: added.song };
+      const added = addSnipInstrument(state.project, name, frames);
+      return { ...state, project: added.project, dirty: true };
     });
   }
 }

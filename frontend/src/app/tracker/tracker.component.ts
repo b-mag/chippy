@@ -1,43 +1,83 @@
 import { HttpClient } from '@angular/common/http';
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  signal,
+  viewChild,
+  ElementRef,
+} from '@angular/core';
 import { RouterLink } from '@angular/router';
 import {
+  activeSongBody,
   armedInstrument,
   chipDefinition,
   chipIds,
   formatNote,
   noteFromKey,
+  patternDisplayName,
+  presetsForChip,
+  songForRender,
   type ColumnId,
-  type Song,
+  type InstrumentKind,
+  type InstrumentPreset,
+  type Project,
 } from '@chippy/domain';
-import { AestheticService, type AestheticId } from '../aesthetic.service';
-import { PlaybackService } from '../playback.service';
+import { PlaybackService, type LoopMode } from '../playback.service';
+import { RadioPlayerService } from '../radio/radio-player.service';
 import { SessionService } from '../session.service';
+import { SupportEntitlementService } from '../support-entitlement.service';
 
 @Component({
   selector: 'app-tracker',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [RouterLink],
   templateUrl: './tracker.component.html',
+  styleUrl: './tracker.component.css',
 })
 export class TrackerComponent {
   readonly session = inject(SessionService);
   readonly columns: ColumnId[] = ['note', 'instrument', 'volume'];
   private readonly playback = inject(PlaybackService);
+  private readonly radio = inject(RadioPlayerService);
   private readonly http = inject(HttpClient);
-  readonly aesthetics = inject(AestheticService);
+  private readonly entitlement = inject(SupportEntitlementService);
+  private readonly renameInput = viewChild<ElementRef<HTMLInputElement>>('renameInput');
+  private readonly instrumentRenameInput = viewChild<ElementRef<HTMLInputElement>>('instrumentRenameInput');
 
   readonly state = this.session.state;
   readonly playRow = this.playback.row;
   readonly status = signal('');
-  readonly loop = signal(false);
+  readonly loop = signal<LoopMode>('off');
+  private readonly loopCycle: LoopMode[] = ['off', 'pattern', 'song'];
+  readonly loopLabel = computed(() => {
+    const mode = this.loop();
+    if (mode === 'pattern') return 'Loop Pattern';
+    if (mode === 'song') return 'Loop Song';
+    return 'Loop Off';
+  });
   readonly muted = signal<ReadonlySet<number>>(new Set());
   readonly solo = signal<ReadonlySet<number>>(new Set());
-  readonly randomStage = signal<'closed' | 'warn' | 'type'>('closed');
-  readonly confirmText = signal('');
   readonly exportOpen = signal(false);
+  readonly presetsOpen = signal(false);
+  /** Bumps when a chip switch is cancelled so the select rebinds to the current chip. */
+  readonly chipSelectEpoch = signal(0);
+  readonly renamingId = signal<string | null>(null);
+  readonly renameDraft = signal('');
+  readonly renamingInstrumentId = signal<string | null>(null);
+  readonly instrumentRenameDraft = signal('');
+  readonly dragFrom = signal<number | null>(null);
+  readonly dropIndex = signal<number | null>(null);
+  readonly studioFocused = signal(false);
+  readonly lastAuditionMidi = signal(60);
+  readonly presetStatus = signal('');
 
-  readonly chip = computed(() => chipDefinition(this.state().song.chip));
+  readonly project = computed(() => this.state().project);
+  readonly song = computed(() => songForRender(this.state().project));
+  readonly songBody = computed(() => activeSongBody(this.state().project));
+  readonly chip = computed(() => chipDefinition(this.project().chip));
   readonly grid = computed(() => {
     const pattern = this.pattern();
     const cursor = this.state().cursor;
@@ -58,12 +98,87 @@ export class TrackerComponent {
     }));
   });
   readonly pattern = computed(() => {
-    const state = this.state();
-    const id = state.song.order[state.cursor.orderIndex];
-    return state.song.patterns.find((item) => item.id === id) ?? state.song.patterns[0];
+    const body = this.songBody();
+    const cursor = this.state().cursor;
+    const id = body.order[cursor.orderIndex];
+    return body.patterns.find((item) => item.id === id) ?? body.patterns[0];
   });
-  readonly armed = computed(() => armedInstrument(this.state().song));
+  readonly orderEntries = computed(() => {
+    const body = this.songBody();
+    return body.order.map((id, index) => {
+      const pattern = body.patterns.find((item) => item.id === id);
+      const name = pattern ? patternDisplayName(pattern, index) : `Pattern ${index + 1}`;
+      return {
+        id,
+        slotKey: `${index}-${id}`,
+        indexLabel: String(index + 1).padStart(2, '0'),
+        name,
+      };
+    });
+  });
+  readonly armed = computed(() => armedInstrument(this.project()));
   readonly chips = chipIds();
+  readonly kindOptions = computed(() => {
+    const definition = this.chip();
+    const channel = definition.channels[this.state().cursor.channel];
+    const allowed = channel ? definition.kindsForChannel(channel.id) : definition.kinds;
+    const current = this.armed().kind;
+    return allowed.includes(current) ? allowed : [current, ...allowed];
+  });
+  readonly hardwareFields = computed(() => {
+    const armed = this.armed();
+    const channel = this.chip().channels[this.state().cursor.channel];
+    return this.chip().fields.filter(
+      (field) => field.kinds.includes(armed.kind) && (!field.channelId || field.channelId === channel?.id),
+    );
+  });
+  readonly presets = computed(() => presetsForChip(this.project().chip));
+  readonly premiumUnlocked = computed(() => this.entitlement.canUsePremiumPresets());
+  readonly showSnip = computed(() => this.project().chip === 'vectrex');
+  readonly exportKinds = computed(() => {
+    if (this.project().chip === 'gameboy') {
+      return [
+        { id: 'wav' as const, label: 'WAV' },
+        { id: 'vgm' as const, label: 'VGM' },
+      ];
+    }
+    return [
+      { id: 'wav' as const, label: 'WAV' },
+      { id: 'ym' as const, label: 'YM6' },
+      { id: 'aky' as const, label: 'Vectrex AKY' },
+    ];
+  });
+
+  constructor() {
+    effect(() => {
+      const tick = this.playback.tick();
+      if (!tick || !this.playback.playing()) {
+        return;
+      }
+      this.session.followPlayback(tick.orderIndex, tick.row);
+    });
+    effect(() => {
+      if (this.renamingId() && this.renameInput()) {
+        queueMicrotask(() => this.renameInput()?.nativeElement.focus());
+      }
+    });
+    effect(() => {
+      if (this.renamingInstrumentId() && this.instrumentRenameInput()) {
+        queueMicrotask(() => this.instrumentRenameInput()?.nativeElement.focus());
+      }
+    });
+  }
+
+  kindLabel(kind: InstrumentKind): string {
+    const labels: Record<InstrumentKind, string> = {
+      pulse: 'Pulse',
+      wave: 'Wave',
+      noise: 'Noise',
+      tone: 'Tone',
+      snip: 'Snip',
+    };
+    return labels[kind];
+  }
 
   label(column: ColumnId, cellNote: number | null, cut: boolean, instrumentId: string | null, volume: number | null): string {
     if (column === 'note') {
@@ -108,27 +223,50 @@ export class TrackerComponent {
     else if (key === 'ArrowDown') this.session.move(1, 0, 0);
     else if (key === 'ArrowLeft') this.session.move(0, 0, -1);
     else if (key === 'ArrowRight') this.session.move(0, 0, 1);
-    else if (key === 'Backspace' || key === 'Delete') this.session.clear();
-    else if (key === '`' || key === '~') {
-      this.session.enterCut();
+    else if (key === 'Backspace' || key === 'Delete') {
+      if (!this.studioFocused()) {
+        this.session.clear();
+      }
+    } else if (key === '`' || key === '~') {
+      if (!this.studioFocused()) {
+        this.session.enterCut();
+      }
     } else if (key === '[' || key === ']') {
       this.session.octave(this.state().octave + (key === ']' ? 1 : -1));
-    } else if (this.state().cursor.column === 'volume' && /^[0-9a-f]$/i.test(key)) {
+    } else if (!this.studioFocused() && this.state().cursor.column === 'volume' && /^[0-9a-f]$/i.test(key)) {
       this.session.volume(parseInt(key, 16));
-    } else if (this.state().cursor.column === 'note') {
+    } else if (this.studioFocused() || this.state().cursor.column === 'note') {
       const midi = noteFromKey(key.toLowerCase(), this.state().octave);
       if (midi !== null) {
-        this.session.enterNote(midi);
-        this.playback.audition(this.state().song, midi);
+        this.auditionMidi(midi);
+        if (!this.studioFocused()) {
+          this.session.enterNote(midi);
+        }
       }
     }
   }
 
+  auditionMidi(midi: number): void {
+    this.lastAuditionMidi.set(midi);
+    this.playback.audition(this.song(), midi);
+  }
+
+  auditionNoteOffset(semitone: number): void {
+    const midi = Math.min(108, Math.max(24, this.state().octave * 12 + semitone));
+    this.auditionMidi(midi);
+  }
+
+  cycleLoop(): void {
+    const index = this.loopCycle.indexOf(this.loop());
+    this.loop.set(this.loopCycle[(index + 1) % this.loopCycle.length]);
+  }
+
   play(fromCursor: boolean): void {
+    this.radio.stop();
     const state = this.state();
     this.playback.play(
-      state.song,
-      state.cursor.orderIndex,
+      songForRender(state.project),
+      fromCursor ? state.cursor.orderIndex : 0,
       fromCursor ? state.cursor.row : 0,
       this.loop(),
       new Set(this.muted()),
@@ -171,27 +309,148 @@ export class TrackerComponent {
       value = raw === 'true';
     }
     this.session.updateInstrument(this.armed().id, { [key]: value } as Partial<import('@chippy/domain').Instrument>);
+    this.auditionMidi(this.lastAuditionMidi());
+  }
+
+  changeKind(raw: string): void {
+    this.session.changeInstrumentKind(this.armed().id, raw as InstrumentKind);
+    this.auditionMidi(this.lastAuditionMidi());
+  }
+
+  beginRename(id: string, name: string): void {
+    this.renamingId.set(id);
+    this.renameDraft.set(name);
+  }
+
+  commitRename(id: string): void {
+    if (this.renamingId() !== id) {
+      return;
+    }
+    const draft = this.renameDraft().trim();
+    this.renamingId.set(null);
+    if (draft) {
+      this.session.renamePattern(id, draft);
+    }
+  }
+
+  onRenameKey(event: KeyboardEvent, id: string): void {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      (event.target as HTMLInputElement).blur();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      this.renamingId.set(null);
+    }
+  }
+
+  beginInstrumentRename(id: string, name: string): void {
+    this.renamingInstrumentId.set(id);
+    this.instrumentRenameDraft.set(name);
+  }
+
+  commitInstrumentRename(id: string): void {
+    if (this.renamingInstrumentId() !== id) {
+      return;
+    }
+    const draft = this.instrumentRenameDraft().trim();
+    this.renamingInstrumentId.set(null);
+    if (draft) {
+      this.session.renameInstrument(id, draft);
+    }
+  }
+
+  onInstrumentRenameKey(event: KeyboardEvent, id: string): void {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      (event.target as HTMLInputElement).blur();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      this.renamingInstrumentId.set(null);
+    }
+  }
+
+  onOrderDragStart(event: DragEvent, index: number): void {
+    this.dragFrom.set(index);
+    event.dataTransfer?.setData('text/plain', String(index));
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+    }
+  }
+
+  onOrderDragEnd(): void {
+    this.dragFrom.set(null);
+    this.dropIndex.set(null);
+  }
+
+  onOrderDragOver(event: DragEvent): void {
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+    const list = (event.currentTarget as HTMLElement);
+    const slots = Array.from(list.querySelectorAll<HTMLElement>('.order-slot[data-index]'));
+    if (slots.length === 0) {
+      return;
+    }
+    let next = slots.length;
+    for (const slot of slots) {
+      const rect = slot.getBoundingClientRect();
+      const mid = rect.top + rect.height / 2;
+      if (event.clientY < mid) {
+        next = Number(slot.dataset['index']);
+        break;
+      }
+    }
+    this.dropIndex.set(next);
+  }
+
+  onOrderDrop(event: DragEvent): void {
+    event.preventDefault();
+    const from = this.dragFrom();
+    let to = this.dropIndex();
+    this.dragFrom.set(null);
+    this.dropIndex.set(null);
+    if (from === null || to === null) {
+      return;
+    }
+    if (to > from) {
+      to -= 1;
+    }
+    if (to !== from) {
+      this.session.reorderOrder(from, to);
+    }
   }
 
   async save(): Promise<void> {
     const { serializeProject: serialize } = await import('@chippy/files');
-    const song = this.state().song;
-    const blob = new Blob([serialize(song)], { type: 'application/json' });
+    const project = this.project();
+    const blob = new Blob([serialize(project)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${song.name.replace(/[^a-z0-9-_]+/gi, '-') || 'chippy'}.chippy.json`;
+    link.download = `${project.name.replace(/[^a-z0-9-_]+/gi, '-') || 'chippy'}.chippy.json`;
     link.click();
     URL.revokeObjectURL(url);
+    this.session.markClean();
+    this.status.set('Project saved.');
   }
 
   open(file: File | undefined): void {
     if (!file) return;
+    if (this.state().dirty) {
+      const ok = window.confirm(
+        'Opening a project replaces everything on screen. Unsaved work will be lost. Continue?',
+      );
+      if (!ok) {
+        return;
+      }
+    }
     const body = new FormData();
     body.set('file', file);
-    this.http.post<unknown>('/api/projects/validate', body).subscribe({
-      next: (song) => {
-        this.session.load(song as Song);
+    this.http.post<Project>('/api/projects/validate', body).subscribe({
+      next: (project) => {
+        this.playback.stop();
+        this.session.load(project);
         this.status.set('Opened project.');
       },
       error: () => this.status.set('That file was rejected.'),
@@ -202,7 +461,7 @@ export class TrackerComponent {
     this.exportOpen.set(false);
     try {
       const files = await import('@chippy/files');
-      const song = this.state().song;
+      const song = this.song();
       const aky = kind === 'aky' ? files.exportAky(song) : null;
       const bundles = kind === 'wav' ? [files.exportWav(song)]
         : kind === 'ym' ? [files.exportYm(song)]
@@ -212,16 +471,6 @@ export class TrackerComponent {
       this.status.set('Export ready.');
     } catch (error) {
       this.status.set(error instanceof Error ? error.message : 'Export failed.');
-    }
-  }
-
-  commitRandom(): void {
-    const seed = Math.floor(Math.random() * 1_000_000);
-    const replaced = this.session.random(seed, this.confirmText());
-    if (replaced) {
-      this.randomStage.set('closed');
-      this.confirmText.set('');
-      this.status.set('Random song is on screen.');
     }
   }
 
@@ -237,10 +486,6 @@ export class TrackerComponent {
     URL.revokeObjectURL(url);
   }
 
-  aesthetic(id: AestheticId): void {
-    this.aesthetics.select(id);
-  }
-
   sessionName(value: string): void {
     this.session.name(value);
   }
@@ -250,12 +495,59 @@ export class TrackerComponent {
   }
 
   place(row: number, channel: number, column: ColumnId): void {
+    this.studioFocused.set(false);
     this.session.place(row, channel, column);
   }
 
   chipChange(id: string): void {
-    if (id === 'gameboy' || id === 'vectrex') {
-      this.session.setChip(id);
+    if (id !== 'gameboy' && id !== 'vectrex') {
+      return;
     }
+    if (id === this.project().chip) {
+      return;
+    }
+    const continueSwitch = window.confirm(
+      'Changing chip starts a blank project for the new chip. Your current songs, patterns, and instruments leave this screen.\n\nOK = continue\nCancel = stay on this chip',
+    );
+    if (!continueSwitch) {
+      this.chipSelectEpoch.update((value) => value + 1);
+      return;
+    }
+    const saveFirst = window.confirm(
+      'Save your current project and instruments before switching?\n\nOK = Save, then switch\nCancel = Discard and switch',
+    );
+    void this.finishChipChange(id, saveFirst);
+  }
+
+  private async finishChipChange(id: 'gameboy' | 'vectrex', saveFirst: boolean): Promise<void> {
+    if (saveFirst) {
+      await this.save();
+    }
+    this.playback.stop();
+    this.session.newProjectForChip(id);
+    this.status.set(
+      saveFirst
+        ? `Saved, then started a new ${id === 'gameboy' ? 'Game Boy' : 'Vectrex'} project.`
+        : `Discarded previous project. New ${id === 'gameboy' ? 'Game Boy' : 'Vectrex'} project.`,
+    );
+  }
+
+  addPreset(preset: InstrumentPreset): void {
+    if (preset.premium && !this.premiumUnlocked()) {
+      this.presetStatus.set('Premium preset — unlock via Support Chippy (or set presets.unlockAll in config).');
+      return;
+    }
+    this.session.addFromPreset(preset);
+    this.presetsOpen.set(false);
+    this.presetStatus.set(`Added ${preset.name}.`);
+    this.auditionMidi(this.lastAuditionMidi());
+  }
+
+  deleteArmed(): void {
+    if (this.project().instruments.length <= 1) {
+      this.status.set('Keep at least one instrument.');
+      return;
+    }
+    this.session.deleteInstrument(this.armed().id);
   }
 }

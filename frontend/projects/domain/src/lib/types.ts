@@ -2,7 +2,10 @@
 export const PATTERN_ROWS = 16;
 
 /** Version of the `.chippy.json` document. Unknown versions are rejected. */
-export const PROJECT_VERSION = 1;
+export const PROJECT_VERSION = 2;
+
+/** Legacy flat-document version still accepted on open and migrated to v2. */
+export const LEGACY_PROJECT_VERSION = 1;
 
 export type ChipId = 'gameboy' | 'vectrex';
 
@@ -22,6 +25,8 @@ export interface Cell {
 
 export interface Pattern {
   id: string;
+  /** Display name in the Song Order panel. Older files may omit this. */
+  name: string;
   rows: Cell[][];
 }
 
@@ -57,14 +62,39 @@ export interface Instrument {
   frames: number[][] | null;
 }
 
-export interface Song {
-  version: typeof PROJECT_VERSION;
+/** One song inside a project. Patterns and order live here; instruments do not. */
+export interface SongBody {
+  id: string;
   name: string;
-  chip: ChipId;
   /**
    * Quarter-note tempo in beats per minute.
    * A pattern row is a sixteenth note, so row rate is `tempo * 4 / 60`.
    */
+  tempo: number;
+  order: string[];
+  patterns: Pattern[];
+}
+
+/**
+ * Editable Chippy document: one chip, a shared instrument bank, and one or more songs.
+ */
+export interface Project {
+  version: typeof PROJECT_VERSION;
+  name: string;
+  chip: ChipId;
+  instruments: Instrument[];
+  armedInstrumentId: string;
+  songs: SongBody[];
+  activeSongId: string;
+}
+
+/**
+ * Flat render / playback view of the active song plus the project instrument bank.
+ * Engines and exporters consume this shape.
+ */
+export interface Song {
+  name: string;
+  chip: ChipId;
   tempo: number;
   order: string[];
   patterns: Pattern[];

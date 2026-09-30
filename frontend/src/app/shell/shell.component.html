@@ -1,0 +1,25 @@
+<div class="shell">
+  <header class="top">
+    <div class="top-left">
+      <h1 class="wordmark">CHIPPY</h1>
+    </div>
+    <div class="top-right">
+      <label class="theme">Theme
+        <select [value]="aesthetics.current()" (change)="theme(($any($event.target)).value)">
+          @for (choice of aesthetics.choices; track choice) {
+            <option [value]="choice">{{ choice }}</option>
+          }
+        </select>
+      </label>
+    </div>
+  </header>
+
+  <nav class="tabs" aria-label="Workspace">
+    <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Tracker</a>
+    <a routerLink="/radio" routerLinkActive="active">Radio</a>
+  </nav>
+
+  <div class="shell-body">
+    <router-outlet />
+  </div>
+</div>

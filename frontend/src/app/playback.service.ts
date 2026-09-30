@@ -1,40 +1,106 @@
 import { Injectable, signal } from '@angular/core';
-import type { Song } from '@chippy/domain';
+import {
+  auditionChannelIndex,
+  emptyCell,
+  PATTERN_ROWS,
+  type Song,
+} from '@chippy/domain';
 import { renderSong, type AyFrame, type GbFrame } from '@chippy/engines';
+
+export type LoopMode = 'off' | 'pattern' | 'song';
+
+export interface PlaybackTick {
+  orderIndex: number;
+  row: number;
+}
 
 /**
  * Oscillators live on the audio thread. Angular only hears about the
- * current pattern row, once per row, through `row`.
+ * current pattern row, once per row, through `row` / `tick`.
  */
 @Injectable({ providedIn: 'root' })
 export class PlaybackService {
   readonly row = signal<number | null>(null);
+  readonly orderIndex = signal<number | null>(null);
+  readonly tick = signal<PlaybackTick | null>(null);
   readonly playing = signal(false);
   private timer = 0;
+  private auditionTimer = 0;
   private context: AudioContext | null = null;
   private gains: GainNode[] = [];
 
+  /**
+   * Play a short engine-rendered one-shot of the armed instrument at `midi`.
+   * Does not disturb song playback scheduling state beyond a brief overlay
+   * when nothing else is playing.
+   */
   audition(song: Song, midi: number): void {
+    const instrument = song.instruments.find((item) => item.id === song.armedInstrumentId) ?? song.instruments[0];
+    const channel = auditionChannelIndex(song.chip, instrument.kind);
+    const rows = Array.from({ length: PATTERN_ROWS }, () =>
+      Array.from({ length: 4 }, () => emptyCell()),
+    );
+    rows[0][channel] = {
+      note: midi,
+      cut: false,
+      instrumentId: instrument.id,
+      volume: null,
+    };
+    rows[4][channel] = { note: null, cut: true, instrumentId: null, volume: null };
+    const preview: Song = {
+      name: 'audition',
+      chip: song.chip,
+      tempo: Math.max(song.tempo, 120),
+      order: ['aud-pat'],
+      patterns: [{ id: 'aud-pat', name: 'Audition', rows }],
+      instruments: song.instruments,
+      armedInstrumentId: song.armedInstrumentId,
+    };
+    const rendered = renderSong(preview);
     const context = this.ensure();
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    oscillator.type = 'square';
-    oscillator.frequency.value = 440 * 2 ** ((midi - 69) / 12);
-    gain.gain.value = 0.08;
-    oscillator.connect(gain).connect(context.destination);
-    oscillator.start();
-    oscillator.stop(context.currentTime + 0.18);
+    const voiceCount = song.chip === 'vectrex' ? 3 : 4;
+    const resumeSong = this.playing();
+    if (!resumeSong) {
+      this.prepareVoices(context, voiceCount);
+    } else if (this.gains.length !== voiceCount) {
+      this.prepareVoices(context, voiceCount);
+    }
+    window.clearInterval(this.auditionTimer);
+    const framesToPlay = Math.min(rendered.frames.length, rendered.framesPerRow * 5);
+    let index = 0;
+    const emptyMute = new Set<number>();
+    const emptySolo = new Set<number>();
+    const step = () => {
+      if (index >= framesToPlay) {
+        window.clearInterval(this.auditionTimer);
+        this.auditionTimer = 0;
+        if (!resumeSong) {
+          this.gains.forEach((gain) => {
+            gain.gain.value = 0;
+          });
+        }
+        return;
+      }
+      this.applyFrame(rendered.chip, rendered.frames[index], emptyMute, emptySolo);
+      index += 1;
+    };
+    step();
+    this.auditionTimer = window.setInterval(step, 1000 / rendered.frameRate);
   }
 
   stop(): void {
     window.clearInterval(this.timer);
+    window.clearInterval(this.auditionTimer);
     this.timer = 0;
+    this.auditionTimer = 0;
     this.playing.set(false);
     this.row.set(null);
+    this.orderIndex.set(null);
+    this.tick.set(null);
     this.gains.forEach((gain) => { gain.gain.value = 0; });
   }
 
-  play(song: Song, orderIndex: number, fromRow: number, loopPattern: boolean, muted: Set<number>, solo: Set<number>): void {
+  play(song: Song, orderIndex: number, fromRow: number, loop: LoopMode, muted: Set<number>, solo: Set<number>): void {
     this.stop();
     const rendered = renderSong(song);
     const context = this.ensure();
@@ -42,19 +108,28 @@ export class PlaybackService {
     const perRow = rendered.framesPerRow;
     const patternRows = 16;
     const orderCount = song.order.length;
+    const songRows = orderCount * patternRows;
     let absoluteRow = orderIndex * patternRows + fromRow;
     const rowMs = 60000 / (song.tempo * 4);
     this.playing.set(true);
     const tick = () => {
-      const localOrder = Math.floor(absoluteRow / patternRows) % orderCount;
-      if (loopPattern && localOrder !== orderIndex) {
-        absoluteRow = orderIndex * patternRows;
+      if (loop === 'song' && absoluteRow >= songRows) {
+        absoluteRow = 0;
       }
-      const frameIndex = Math.min(rendered.frames.length - 1, (loopPattern ? orderIndex * patternRows + (absoluteRow % patternRows) : absoluteRow) * perRow);
+      let localOrder = Math.floor(absoluteRow / patternRows) % orderCount;
+      if (loop === 'pattern' && localOrder !== orderIndex) {
+        absoluteRow = orderIndex * patternRows;
+        localOrder = orderIndex;
+      }
+      const localRow = absoluteRow % patternRows;
+      const frameRow = loop === 'pattern' ? orderIndex * patternRows + localRow : absoluteRow % songRows;
+      const frameIndex = Math.min(rendered.frames.length - 1, frameRow * perRow);
       this.applyFrame(rendered.chip, rendered.frames[frameIndex], muted, solo);
-      this.row.set(absoluteRow % patternRows);
+      this.row.set(localRow);
+      this.orderIndex.set(localOrder);
+      this.tick.set({ orderIndex: localOrder, row: localRow });
       absoluteRow += 1;
-      if (!loopPattern && absoluteRow >= orderCount * patternRows) {
+      if (loop === 'off' && absoluteRow >= songRows) {
         this.stop();
       }
     };

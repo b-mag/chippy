@@ -1,3 +1,21 @@
 {
-  "splashEnabled": true
+  "splashEnabled": true,
+  "coffee": {
+    "enabled": false,
+    "url": "",
+    "delayMinutes": 5,
+    "title": "Hey! If you are enjoying this please consider buying me a coffee...",
+    "body": "It will help pay server costs to keep this running and free for everyone!!!",
+    "acceptLabel": "Alright!",
+    "dismissLabel": "Maybe Later"
+  },
+  "ads": {
+    "enabled": false,
+    "provider": "adsense",
+    "clientId": "",
+    "slotId": ""
+  },
+  "presets": {
+    "unlockAll": true
+  }
 }

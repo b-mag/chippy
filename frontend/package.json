@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node ./node_modules/@angular/cli/bin/ng.js serve --proxy-config proxy.conf.json --port 4200",
     "build": "node ./node_modules/@angular/cli/bin/ng.js build",
-    "test": "node ./node_modules/vitest/vitest.mjs run",
+    "test": "node ./node_modules/vitest/vitest.mjs run --coverage",
     "lint": "node ./node_modules/eslint/bin/eslint.js ."
   },
   "dependencies": {
@@ -24,6 +24,7 @@
     "@angular/cli": "^22.2.0",
     "@angular/compiler-cli": "^22.2.0",
     "@eslint/js": "^9.39.0",
+    "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^9.39.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.71.0",
