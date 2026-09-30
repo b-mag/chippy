@@ -1,6 +1,6 @@
 # Chippy
 
-A web tracker for writing Game Boy and Vectrex chiptunes.  I'd like to keep it as simple as LSDJ and support various 8 bit chips.
+A web tracker for writing Game Boy and Vectrex chiptunes.  I'd like to keep it as simple as LSDJ and support various 8 bit chips.  PS just in case one of the guys from the other day reads this... yes an Index can speed up deletes.
 
 <img width="1032" height="930" alt="Screenshot 2026-09-29 214528" src="https://github.com/user-attachments/assets/af8d5db2-d116-4e6b-ac23-c1782d78bf47" />
 
