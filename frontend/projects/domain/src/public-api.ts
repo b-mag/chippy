@@ -24,14 +24,25 @@ export { emptyCell, newSong } from './lib/song-factory';
 export {
   addInstrument,
   addPattern,
+  addRandomPattern,
   addSnipInstrument,
   armInstrument,
   armedInstrument,
+  clearPattern,
   confirmationAccepted,
+  duplicateBaseName,
+  duplicatePattern,
+  followPlaybackOrder,
   formatNote,
   loadSong,
   newSession,
+  nextBlankPatternName,
+  nextDuplicatePatternName,
   noteFromKey,
+  patternDisplayName,
+  removeOrderEntry,
+  renamePattern,
+  reorderOrder,
   replaceWithRandom,
   selectOrder,
   setChip,
@@ -49,4 +60,4 @@ export {
   setVolume,
   undo,
 } from './lib/session';
-export { randomSong } from './lib/random-song';
+export { fillPatternRandom, randomSong } from './lib/random-song';

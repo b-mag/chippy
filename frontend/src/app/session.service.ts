@@ -2,16 +2,22 @@ import { Injectable, signal } from '@angular/core';
 import {
   addInstrument,
   addPattern,
+  addRandomPattern,
   addSnipInstrument,
   armInstrument,
   clearCell,
+  clearPattern,
+  duplicatePattern,
   enterCut,
   enterNote,
+  followPlaybackOrder,
   loadSong,
   moveCursor,
   newSession,
   redo,
-  replaceWithRandom,
+  removeOrderEntry,
+  renamePattern,
+  reorderOrder,
   selectOrder,
   setChip,
   setName,
@@ -75,8 +81,36 @@ export class SessionService {
     this.state.update((state) => addPattern(state));
   }
 
+  duplicatePattern(): void {
+    this.state.update((state) => duplicatePattern(state));
+  }
+
+  addRandomPattern(seed = Math.floor(Math.random() * 1_000_000)): void {
+    this.state.update((state) => addRandomPattern(state, seed));
+  }
+
+  clearPattern(): void {
+    this.state.update((state) => clearPattern(state));
+  }
+
+  removePattern(): void {
+    this.state.update((state) => removeOrderEntry(state));
+  }
+
+  renamePattern(id: string, name: string): void {
+    this.state.update((state) => renamePattern(state, id, name));
+  }
+
+  reorderOrder(fromIndex: number, toIndex: number): void {
+    this.state.update((state) => reorderOrder(state, fromIndex, toIndex));
+  }
+
   selectOrder(index: number): void {
     this.state.update((state) => selectOrder(state, index));
+  }
+
+  followPlayback(orderIndex: number, row: number): void {
+    this.state.update((state) => followPlaybackOrder(state, orderIndex, row));
   }
 
   updateInstrument(id: string, patch: Partial<Instrument>): void {
@@ -101,12 +135,6 @@ export class SessionService {
 
   octave(value: number): void {
     this.state.update((state) => setOctave(state, value));
-  }
-
-  random(seed: number, typed: string): boolean {
-    const before = this.state().song;
-    this.state.update((state) => replaceWithRandom(state, seed, typed));
-    return this.state().song !== before;
   }
 
   load(song: Song): void {

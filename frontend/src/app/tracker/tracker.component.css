@@ -2,7 +2,7 @@ app-tracker { display: block; height: 100%; }
 
 .workspace {
   display: grid;
-  grid-template-columns: 11rem minmax(0, 1fr) 16rem;
+  grid-template-columns: 14rem minmax(0, 1fr) 16rem;
   grid-template-rows: auto minmax(0, 1fr) auto auto;
   gap: 12px;
   height: 100vh;
@@ -12,7 +12,7 @@ app-tracker { display: block; height: 100%; }
 
 .top, .hint, .status, .menu { grid-column: 1 / -1; }
 
-.top, .order, .instrument, .grid, .menu, .dialog {
+.top, .order, .instrument, .grid, .menu {
   background: var(--chrome);
   border: 1px solid var(--cell-edge);
   border-radius: 10px;
@@ -23,17 +23,139 @@ app-tracker { display: block; height: 100%; }
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+  justify-content: space-between;
   padding: 10px 12px;
 }
 
+.top-left, .top-right {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.top-right { margin-left: auto; }
+
+.btn-from-cursor { min-width: 7.5rem; }
+.btn-loop { min-width: 7.5rem; }
+.btn-undo, .btn-redo { min-width: 4.5rem; }
+.btn-save { min-width: 7.5rem; }
+.btn-mute { min-width: 4.8rem; }
+.btn-solo { min-width: 4.8rem; }
+
+.file {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 14rem;
+}
+
+.file input { width: 100%; max-width: none; }
+
 .order, .instrument { padding: 12px; overflow: auto; }
 .grid { overflow: auto; padding: 8px; background: var(--cell); }
+
+.order h2, .instrument h2 { margin: 0 0 8px; font-size: 1rem; }
+
+.order-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 2rem;
+}
+
+.order-slot {
+  position: relative;
+  margin: 0;
+}
+
+.order-slot.drop-before::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -2px;
+  height: 2px;
+  background: var(--cursor);
+  border-radius: 1px;
+  z-index: 1;
+}
+
+.order-slot.drop-end {
+  height: 8px;
+  list-style: none;
+}
+
+.order-item {
+  width: 100%;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  text-align: left;
+  background: var(--cell);
+  border: 1px solid var(--cell-edge);
+  min-height: 2.25rem;
+}
+
+.order-item[aria-current='true'] {
+  background: color-mix(in srgb, var(--cursor) 28%, var(--cell));
+  border-color: var(--cursor);
+  box-shadow: inset 0 0 0 1px var(--cursor);
+  font-weight: 600;
+}
+
+.order-index {
+  font-family: ui-monospace, monospace;
+  color: var(--muted);
+  min-width: 1.5rem;
+}
+
+.order-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-rename {
+  width: 100%;
+  min-height: 2.25rem;
+}
+
+.order-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.order-actions button {
+  width: 100%;
+  min-height: 2.5rem;
+  white-space: normal;
+  line-height: 1.2;
+}
 
 .grid-head, .grid-row {
   display: grid;
   grid-template-columns: 2rem repeat(auto-fit, minmax(0, 1fr));
   gap: 6px;
   align-items: center;
+}
+
+.channel-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.channel-toggles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
 }
 
 .channel-cells { display: flex; gap: 4px; }
@@ -48,15 +170,48 @@ app-tracker { display: block; height: 100%; }
 .cell.cursor { box-shadow: inset 0 0 0 2px var(--cursor); }
 .playhead { background: color-mix(in srgb, var(--playhead) 28%, transparent); }
 
-.hint, .status { margin: 0; color: var(--muted); }
-.dialog {
-  position: fixed;
-  inset: auto 12px 72px auto;
-  width: min(24rem, calc(100% - 24px));
-  padding: 16px;
-  z-index: 5;
+.instrument ul {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.paint { margin-left: auto; }
+.instrument ul button {
+  width: 100%;
+  text-align: left;
+}
+
+.instrument ul button[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--cursor) 28%, var(--cell));
+  border-color: var(--cursor);
+  font-weight: 600;
+}
+
+.instrument-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.instrument-actions button,
+.snip-link {
+  width: 100%;
+  min-height: 2.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  color: inherit;
+  background: var(--cell);
+  border: 1px solid var(--cell-edge);
+  border-radius: 6px;
+  padding: 6px 10px;
+  box-sizing: border-box;
+}
+
+.hint, .status { margin: 0; color: var(--muted); }
 .menu { display: flex; gap: 8px; padding: 8px; }
-.file input { max-width: 12rem; }

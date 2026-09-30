@@ -46,6 +46,16 @@ export function parseProject(raw: string): Song {
   if (!CHIP_IDS.includes(song.chip)) {
     reject('Unknown chip.');
   }
+  song.patterns = song.patterns.map((pattern, index) => {
+    if (!isRecord(pattern as unknown)) {
+      return pattern;
+    }
+    const record = pattern as unknown as Record<string, unknown>;
+    const name = typeof record['name'] === 'string' && record['name'].trim()
+      ? String(record['name']).trim().slice(0, 40)
+      : `Pattern ${index + 1}`;
+    return { ...pattern, name };
+  });
   return song;
 }
 

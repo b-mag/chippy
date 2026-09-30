@@ -22,6 +22,8 @@ export interface Cell {
 
 export interface Pattern {
   id: string;
+  /** Display name in the Order panel. Older files may omit this. */
+  name: string;
   rows: Cell[][];
 }
 

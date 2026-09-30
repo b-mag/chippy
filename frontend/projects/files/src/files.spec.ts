@@ -29,6 +29,9 @@ describe('project file', () => {
     expect(() => parseProject(JSON.stringify({ ...song, chip: 'c64' }))).toThrow(/chip/);
     expect(downloadName({ ...song, name: 'My Song!' }, 'json')).toBe('My-Song.json');
     expect(downloadName({ ...song, name: '!!!' }, 'json')).toBe('chippy.json');
+    const legacy = JSON.parse(text) as { patterns: Array<Record<string, unknown>> };
+    delete legacy.patterns[0]['name'];
+    expect(parseProject(JSON.stringify(legacy)).patterns[0].name).toBe('Pattern 1');
   });
 });
 

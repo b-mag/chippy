@@ -1,5 +1,5 @@
 import { baseInstrument, chipDefinition } from './chips';
-import { randomSong } from './random-song';
+import { fillPatternRandom, randomSong } from './random-song';
 import { blankPattern, emptyCell, newSong } from './song-factory';
 import {
   PATTERN_ROWS,
@@ -11,6 +11,63 @@ import {
   type Pattern,
   type Song,
 } from './types';
+
+const BLANK_PATTERN_NAME = /^Pattern (\d+)$/;
+const DUPLICATE_SUFFIX = /^(.*) \((\d+)\)$/;
+
+/** Next `"Pattern N"` name based on existing pattern names. */
+export function nextBlankPatternName(song: Song): string {
+  let max = 0;
+  for (const pattern of song.patterns) {
+    const match = BLANK_PATTERN_NAME.exec(pattern.name ?? '');
+    if (match) {
+      max = Math.max(max, Number(match[1]));
+    }
+  }
+  return `Pattern ${max + 1}`;
+}
+
+/** Strip a trailing ` (N)` duplicate suffix to get the copy base name. */
+export function duplicateBaseName(name: string): string {
+  const match = DUPLICATE_SUFFIX.exec(name);
+  return match ? match[1] : name;
+}
+
+/** Next `"{base} (N)"` name for copies of a source pattern name. */
+export function nextDuplicatePatternName(song: Song, sourceName: string): string {
+  const base = duplicateBaseName(sourceName);
+  let max = 0;
+  for (const pattern of song.patterns) {
+    const name = pattern.name ?? '';
+    if (name === base) {
+      continue;
+    }
+    const match = DUPLICATE_SUFFIX.exec(name);
+    if (match && match[1] === base) {
+      max = Math.max(max, Number(match[2]));
+    }
+  }
+  return `${base} (${max + 1})`;
+}
+
+function nextPatternId(song: Song): string {
+  let max = 0;
+  for (const pattern of song.patterns) {
+    const match = /^pat-(\d+)$/.exec(pattern.id);
+    if (match) {
+      max = Math.max(max, Number(match[1]));
+    }
+  }
+  return `pat-${max + 1}`;
+}
+
+/** Display name when an older file omitted `pattern.name`. */
+export function patternDisplayName(pattern: Pattern, fallbackIndex: number): string {
+  if (pattern.name && pattern.name.trim()) {
+    return pattern.name;
+  }
+  return `Pattern ${fallbackIndex + 1}`;
+}
 
 const COLUMNS: ColumnId[] = ['note', 'instrument', 'volume'];
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -205,8 +262,112 @@ export function setChip(state: SessionState, chip: ChipId): SessionState {
 
 export function addPattern(state: SessionState): SessionState {
   const song = cloneSong(state.song);
-  const id = `pat-${song.patterns.length + 1}`;
-  const pattern = blankPattern(id);
+  const id = nextPatternId(song);
+  const pattern = blankPattern(id, nextBlankPatternName(song));
+  song.patterns = [...song.patterns, pattern];
+  song.order = [...song.order, id];
+  return {
+    ...commit(state, song),
+    cursor: { ...state.cursor, orderIndex: song.order.length - 1, row: 0 },
+  };
+}
+
+export function duplicatePattern(state: SessionState): SessionState {
+  const song = cloneSong(state.song);
+  const sourceId = song.order[state.cursor.orderIndex] ?? song.order[0];
+  const source = song.patterns.find((item) => item.id === sourceId) ?? song.patterns[0];
+  const id = nextPatternId(song);
+  const sourceName = source.name || patternDisplayName(source, state.cursor.orderIndex);
+  const pattern: Pattern = {
+    id,
+    name: nextDuplicatePatternName(song, sourceName),
+    rows: structuredClone(source.rows),
+  };
+  song.patterns = [...song.patterns, pattern];
+  const insertAt = Math.min(state.cursor.orderIndex + 1, song.order.length);
+  song.order = [...song.order.slice(0, insertAt), id, ...song.order.slice(insertAt)];
+  return {
+    ...commit(state, song),
+    cursor: { ...state.cursor, orderIndex: insertAt, row: 0 },
+  };
+}
+
+export function reorderOrder(state: SessionState, fromIndex: number, toIndex: number): SessionState {
+  const song = cloneSong(state.song);
+  if (
+    fromIndex < 0
+    || toIndex < 0
+    || fromIndex >= song.order.length
+    || toIndex >= song.order.length
+    || fromIndex === toIndex
+  ) {
+    return state;
+  }
+  const order = [...song.order];
+  const [moved] = order.splice(fromIndex, 1);
+  order.splice(toIndex, 0, moved);
+  song.order = order;
+  let orderIndex = state.cursor.orderIndex;
+  if (orderIndex === fromIndex) {
+    orderIndex = toIndex;
+  } else if (fromIndex < orderIndex && toIndex >= orderIndex) {
+    orderIndex -= 1;
+  } else if (fromIndex > orderIndex && toIndex <= orderIndex) {
+    orderIndex += 1;
+  }
+  return {
+    ...commit(state, song),
+    cursor: { ...state.cursor, orderIndex },
+  };
+}
+
+export function renamePattern(state: SessionState, id: string, name: string): SessionState {
+  const trimmed = name.trim().slice(0, 40);
+  if (!trimmed) {
+    return state;
+  }
+  const song = cloneSong(state.song);
+  const existing = song.patterns.find((item) => item.id === id);
+  if (!existing || existing.name === trimmed) {
+    return state;
+  }
+  song.patterns = song.patterns.map((item) => (item.id === id ? { ...item, name: trimmed } : item));
+  return commit(state, song);
+}
+
+export function removeOrderEntry(state: SessionState): SessionState {
+  const song = cloneSong(state.song);
+  if (song.order.length <= 1) {
+    return state;
+  }
+  const removeIndex = state.cursor.orderIndex;
+  const removedId = song.order[removeIndex];
+  song.order = song.order.filter((_, index) => index !== removeIndex);
+  if (!song.order.includes(removedId)) {
+    song.patterns = song.patterns.filter((item) => item.id !== removedId);
+  }
+  const orderIndex = Math.min(removeIndex, song.order.length - 1);
+  return {
+    ...commit(state, song),
+    cursor: { ...state.cursor, orderIndex, row: 0 },
+  };
+}
+
+export function clearPattern(state: SessionState): SessionState {
+  const song = cloneSong(state.song);
+  const pattern = currentPattern(song, state.cursor);
+  const cleared: Pattern = {
+    ...pattern,
+    rows: pattern.rows.map((row) => row.map(() => emptyCell())),
+  };
+  return commit(state, writePattern(song, cleared));
+}
+
+export function addRandomPattern(state: SessionState, seed: number): SessionState {
+  const song = cloneSong(state.song);
+  const id = nextPatternId(song);
+  const pattern = blankPattern(id, nextBlankPatternName(song));
+  fillPatternRandom(pattern, song.chip, song.armedInstrumentId, seed);
   song.patterns = [...song.patterns, pattern];
   song.order = [...song.order, id];
   return {
@@ -216,7 +377,21 @@ export function addPattern(state: SessionState): SessionState {
 }
 
 export function selectOrder(state: SessionState, orderIndex: number): SessionState {
-  return { ...state, cursor: { ...state.cursor, orderIndex, row: 0 } };
+  const clamped = Math.min(Math.max(0, orderIndex), Math.max(0, state.song.order.length - 1));
+  return { ...state, cursor: { ...state.cursor, orderIndex: clamped, row: 0 } };
+}
+
+/** Move the order cursor during playback without touching undo history. */
+export function followPlaybackOrder(state: SessionState, orderIndex: number, row: number): SessionState {
+  const clampedOrder = Math.min(Math.max(0, orderIndex), Math.max(0, state.song.order.length - 1));
+  const clampedRow = Math.min(PATTERN_ROWS - 1, Math.max(0, row));
+  if (state.cursor.orderIndex === clampedOrder && state.cursor.row === clampedRow) {
+    return state;
+  }
+  return {
+    ...state,
+    cursor: { ...state.cursor, orderIndex: clampedOrder, row: clampedRow },
+  };
 }
 
 export function updateInstrument(state: SessionState, id: string, patch: Partial<Instrument>): SessionState {
@@ -285,8 +460,12 @@ export function replaceWithRandom(state: SessionState, seed: number, typed: stri
 }
 
 export function loadSong(state: SessionState, song: Song): SessionState {
+  const patterns = song.patterns.map((pattern, index) => ({
+    ...pattern,
+    name: pattern.name?.trim() ? pattern.name.trim().slice(0, 40) : `Pattern ${index + 1}`,
+  }));
   return {
-    song,
+    song: { ...song, patterns },
     cursor: { orderIndex: 0, row: 0, channel: 0, column: 'note' },
     octave: state.octave,
     past: [],

@@ -1,6 +1,6 @@
 import { chipDefinition } from './chips';
 import { newSong } from './song-factory';
-import type { ChipId, Song } from './types';
+import type { ChipId, Pattern, Song } from './types';
 import { PATTERN_ROWS } from './types';
 
 /** Deterministic generator so a test can demand a known pattern. */
@@ -16,15 +16,12 @@ export function mulberry32(seed: number): () => number {
 }
 
 /**
- * One 16-row pattern, default instrument, notes scattered on every channel
- * the selected chip actually has.
+ * Scatter notes into an existing pattern. Mutates `pattern.rows`.
+ * Uses the given instrument id on every written cell.
  */
-export function randomSong(chip: ChipId, seed: number): Song {
+export function fillPatternRandom(pattern: Pattern, chip: ChipId, instrumentId: string, seed: number): void {
   const random = mulberry32(seed);
-  const song = newSong(chip, 'Random');
-  const pattern = song.patterns[0];
   const channelCount = chipDefinition(chip).channels.length;
-  const instrumentId = song.armedInstrumentId;
   const pitches = [60, 62, 64, 65, 67, 69, 71, 72];
   for (let channel = 0; channel < channelCount; channel += 1) {
     for (let row = 0; row < PATTERN_ROWS; row += 1) {
@@ -40,5 +37,14 @@ export function randomSong(chip: ChipId, seed: number): Song {
       };
     }
   }
+}
+
+/**
+ * One 16-row pattern, default instrument, notes scattered on every channel
+ * the selected chip actually has. Kept for deterministic tests.
+ */
+export function randomSong(chip: ChipId, seed: number): Song {
+  const song = newSong(chip, 'Random');
+  fillPatternRandom(song.patterns[0], chip, song.armedInstrumentId, seed);
   return song;
 }

@@ -2,13 +2,22 @@ import { Injectable, signal } from '@angular/core';
 import type { Song } from '@chippy/domain';
 import { renderSong, type AyFrame, type GbFrame } from '@chippy/engines';
 
+export type LoopMode = 'off' | 'pattern' | 'song';
+
+export interface PlaybackTick {
+  orderIndex: number;
+  row: number;
+}
+
 /**
  * Oscillators live on the audio thread. Angular only hears about the
- * current pattern row, once per row, through `row`.
+ * current pattern row, once per row, through `row` / `tick`.
  */
 @Injectable({ providedIn: 'root' })
 export class PlaybackService {
   readonly row = signal<number | null>(null);
+  readonly orderIndex = signal<number | null>(null);
+  readonly tick = signal<PlaybackTick | null>(null);
   readonly playing = signal(false);
   private timer = 0;
   private context: AudioContext | null = null;
@@ -31,10 +40,12 @@ export class PlaybackService {
     this.timer = 0;
     this.playing.set(false);
     this.row.set(null);
+    this.orderIndex.set(null);
+    this.tick.set(null);
     this.gains.forEach((gain) => { gain.gain.value = 0; });
   }
 
-  play(song: Song, orderIndex: number, fromRow: number, loopPattern: boolean, muted: Set<number>, solo: Set<number>): void {
+  play(song: Song, orderIndex: number, fromRow: number, loop: LoopMode, muted: Set<number>, solo: Set<number>): void {
     this.stop();
     const rendered = renderSong(song);
     const context = this.ensure();
@@ -42,19 +53,28 @@ export class PlaybackService {
     const perRow = rendered.framesPerRow;
     const patternRows = 16;
     const orderCount = song.order.length;
+    const songRows = orderCount * patternRows;
     let absoluteRow = orderIndex * patternRows + fromRow;
     const rowMs = 60000 / (song.tempo * 4);
     this.playing.set(true);
     const tick = () => {
-      const localOrder = Math.floor(absoluteRow / patternRows) % orderCount;
-      if (loopPattern && localOrder !== orderIndex) {
-        absoluteRow = orderIndex * patternRows;
+      if (loop === 'song' && absoluteRow >= songRows) {
+        absoluteRow = 0;
       }
-      const frameIndex = Math.min(rendered.frames.length - 1, (loopPattern ? orderIndex * patternRows + (absoluteRow % patternRows) : absoluteRow) * perRow);
+      let localOrder = Math.floor(absoluteRow / patternRows) % orderCount;
+      if (loop === 'pattern' && localOrder !== orderIndex) {
+        absoluteRow = orderIndex * patternRows;
+        localOrder = orderIndex;
+      }
+      const localRow = absoluteRow % patternRows;
+      const frameRow = loop === 'pattern' ? orderIndex * patternRows + localRow : absoluteRow % songRows;
+      const frameIndex = Math.min(rendered.frames.length - 1, frameRow * perRow);
       this.applyFrame(rendered.chip, rendered.frames[frameIndex], muted, solo);
-      this.row.set(absoluteRow % patternRows);
+      this.row.set(localRow);
+      this.orderIndex.set(localOrder);
+      this.tick.set({ orderIndex: localOrder, row: localRow });
       absoluteRow += 1;
-      if (!loopPattern && absoluteRow >= orderCount * patternRows) {
+      if (loop === 'off' && absoluteRow >= songRows) {
         this.stop();
       }
     };

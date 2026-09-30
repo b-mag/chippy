@@ -1,38 +1,42 @@
 <div class="workspace" (keydown)="onKey($event)" tabindex="0">
   <header class="top">
-    <h1 class="wordmark">CHIPPY</h1>
-    <label>Chip
-      <select [value]="state().song.chip" (change)="chipChange(($any($event.target)).value)">
-        @for (id of chips; track id) {
-          <option [value]="id">{{ id === 'gameboy' ? 'Game Boy' : 'Vectrex' }}</option>
-        }
-      </select>
-    </label>
-    <label>Name
-      <input [value]="state().song.name" (change)="sessionName(($any($event.target)).value)" />
-    </label>
-    <label>Tempo
-      <input type="number" min="40" max="240" [value]="state().song.tempo" (change)="sessionTempo(($any($event.target)).value)" />
-    </label>
-    <label>Octave {{ state().octave }}</label>
-    <button type="button" (click)="play(false)">Play</button>
-    <button type="button" (click)="play(true)">From cursor</button>
-    <button type="button" (click)="stop()">Stop</button>
-    <button type="button" (click)="loop.set(!loop())">{{ loop() ? 'Loop on' : 'Loop off' }}</button>
-    <button type="button" (click)="save()">Save</button>
-    <label class="file">Open
-      <input type="file" accept=".json,application/json" (change)="open(($any($event.target)).files?.[0])" />
-    </label>
-    <button type="button" (click)="exportOpen.set(!exportOpen())">Export</button>
-    <button type="button" (click)="randomStage.set('warn')">Create random song</button>
-    <a routerLink="/listen">Snip a YM</a>
-    <label class="paint">Paint
-      <select [value]="aesthetics.current()" (change)="aesthetic(($any($event.target)).value)">
-        @for (choice of aesthetics.choices; track choice) {
-          <option [value]="choice">{{ choice }}</option>
-        }
-      </select>
-    </label>
+    <div class="top-left">
+      <h1 class="wordmark">CHIPPY</h1>
+      <label>Chip
+        <select [value]="state().song.chip" (change)="chipChange(($any($event.target)).value)">
+          @for (id of chips; track id) {
+            <option [value]="id">{{ id === 'gameboy' ? 'Game Boy' : 'Vectrex' }}</option>
+          }
+        </select>
+      </label>
+      <label>Name
+        <input [value]="state().song.name" (change)="sessionName(($any($event.target)).value)" />
+      </label>
+      <label>Tempo
+        <input type="number" min="40" max="240" [value]="state().song.tempo" (change)="sessionTempo(($any($event.target)).value)" />
+      </label>
+      <label>Octave {{ state().octave }}</label>
+      <button type="button" (click)="play(false)">Play</button>
+      <button type="button" class="btn-from-cursor" (click)="play(true)">From cursor</button>
+      <button type="button" (click)="stop()">Stop</button>
+      <button type="button" class="btn-loop" (click)="cycleLoop()">{{ loopLabel() }}</button>
+      <button type="button" class="btn-undo" [disabled]="state().past.length === 0" (click)="session.undo()">Undo</button>
+      <button type="button" class="btn-redo" [disabled]="state().future.length === 0" (click)="session.redo()">Redo</button>
+    </div>
+    <div class="top-right">
+      <button type="button" class="btn-save" (click)="save()">Save Project</button>
+      <label class="file">Open Project
+        <input type="file" accept=".json,application/json" (change)="open(($any($event.target)).files?.[0])" />
+      </label>
+      <button type="button" (click)="exportOpen.set(!exportOpen())">Export</button>
+      <label class="paint">Paint
+        <select [value]="aesthetics.current()" (change)="aesthetic(($any($event.target)).value)">
+          @for (choice of aesthetics.choices; track choice) {
+            <option [value]="choice">{{ choice }}</option>
+          }
+        </select>
+      </label>
+    </div>
   </header>
 
   @if (exportOpen()) {
@@ -46,24 +50,61 @@
 
   <aside class="order">
     <h2>Order</h2>
-    <ol>
-      @for (id of state().song.order; track id; let index = $index) {
-        <li>
-          <button type="button" [attr.aria-current]="index === state().cursor.orderIndex" (click)="session.selectOrder(index)">Pattern {{ index + 1 }}</button>
+    <ol class="order-list"
+      (dragover)="onOrderDragOver($event)"
+      (drop)="onOrderDrop($event)">
+      @for (entry of orderEntries(); track entry.slotKey; let index = $index) {
+        <li
+          class="order-slot"
+          [class.drop-before]="dropIndex() === index"
+          [attr.data-index]="index"
+          draggable="true"
+          (dragstart)="onOrderDragStart($event, index)"
+          (dragend)="onOrderDragEnd()">
+          @if (renamingId() === entry.id) {
+            <input
+              class="order-rename"
+              [value]="renameDraft()"
+              (input)="renameDraft.set(($any($event.target)).value)"
+              (keydown)="onRenameKey($event, entry.id)"
+              (blur)="commitRename(entry.id)"
+              #renameInput />
+          } @else {
+            <button
+              type="button"
+              class="order-item"
+              [attr.aria-current]="index === state().cursor.orderIndex ? 'true' : null"
+              (click)="session.selectOrder(index)"
+              (dblclick)="beginRename(entry.id, entry.name)">
+              <span class="order-index">{{ entry.indexLabel }}</span>
+              <span class="order-name">{{ entry.name }}</span>
+            </button>
+          }
         </li>
       }
+      @if (dropIndex() === orderEntries().length) {
+        <li class="order-slot drop-before drop-end" aria-hidden="true"></li>
+      }
     </ol>
-    <button type="button" (click)="session.addPattern()">Add pattern</button>
+    <div class="order-actions">
+      <button type="button" (click)="session.addPattern()">Add blank pattern</button>
+      <button type="button" (click)="session.addRandomPattern()">Add new pattern with random notes</button>
+      <button type="button" (click)="session.duplicatePattern()">Copy/Paste Pattern</button>
+      <button type="button" (click)="session.clearPattern()">Clear Pattern</button>
+      <button type="button" [disabled]="state().song.order.length <= 1" (click)="session.removePattern()">Remove pattern</button>
+    </div>
   </aside>
 
   <section class="grid" role="grid" aria-label="Pattern">
     <div class="grid-head" role="row">
       <span></span>
       @for (channel of chip().channels; track channel.id; let index = $index) {
-        <span role="columnheader">
+        <span class="channel-head" role="columnheader">
           {{ channel.label }}
-          <button type="button" (click)="toggleChannel('mute', index)">{{ muted().has(index) ? 'Unmute' : 'Mute' }}</button>
-          <button type="button" (click)="toggleChannel('solo', index)">{{ solo().has(index) ? 'Unsolo' : 'Solo' }}</button>
+          <span class="channel-toggles">
+            <button type="button" class="btn-mute" (click)="toggleChannel('mute', index)">{{ muted().has(index) ? 'Unmute' : 'Mute' }}</button>
+            <button type="button" class="btn-solo" (click)="toggleChannel('solo', index)">{{ solo().has(index) ? 'Unsolo' : 'Solo' }}</button>
+          </span>
         </span>
       }
     </div>
@@ -98,7 +139,10 @@
         </li>
       }
     </ul>
-    <button type="button" (click)="session.addInstrument()">Add instrument</button>
+    <div class="instrument-actions">
+      <button type="button" (click)="session.addInstrument()">Add instrument</button>
+      <a class="snip-link" routerLink="/listen">Snip a YM</a>
+    </div>
     @for (field of chip().fields; track field.key) {
       @if (field.kinds.includes(armed().kind) && (!field.channelId || field.channelId === chip().channels[state().cursor.channel].id)) {
         <label>{{ field.label }}
@@ -118,22 +162,6 @@
     }
   </aside>
 
-  <p class="hint">Z through M play notes. Q through U is the next octave. Arrows move. Backtick cuts the note. Space plays. Ctrl+Z undoes. Octave {{ state().octave }}.</p>
+  <p class="hint">Z through M play notes. Q through U is the next octave. Arrows move. Backtick cuts the note. Space plays. Ctrl+Z undoes. Ctrl+Y or Ctrl+Shift+Z redoes. Octave {{ state().octave }}.</p>
   <p class="status" role="status">{{ status() }}</p>
-
-  @if (randomStage() !== 'closed') {
-    <div class="dialog" role="alertdialog" aria-labelledby="random-title">
-      @if (randomStage() === 'warn') {
-        <h2 id="random-title">Replace the song on screen?</h2>
-        <p>The pattern you are editing will be replaced. A file you already saved is left alone.</p>
-        <button type="button" (click)="randomStage.set('type')">Continue</button>
-        <button type="button" (click)="randomStage.set('closed')">Cancel</button>
-      } @else {
-        <h2 id="random-title">Type YES to replace it</h2>
-        <input [value]="confirmText()" (input)="confirmText.set(($any($event.target)).value)" aria-label="Type YES" />
-        <button type="button" [disabled]="confirmText() !== 'YES'" (click)="commitRandom()">Replace</button>
-        <button type="button" (click)="randomStage.set('closed')">Cancel</button>
-      }
-    </div>
-  }
 </div>

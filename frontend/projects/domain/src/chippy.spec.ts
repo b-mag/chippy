@@ -37,8 +37,20 @@ describe('note entry', () => {
   });
 });
 
-describe('random song confirm', () => {
-  it('leaves the song alone until YES is typed', () => {
+describe('random pattern fill', () => {
+  it('fills one pattern from a known seed', () => {
+    const first = randomSong('gameboy', 7);
+    const second = randomSong('gameboy', 7);
+    expect(first).toEqual(second);
+    expect(first.patterns).toHaveLength(1);
+    expect(first.patterns[0].name).toBe('Pattern 1');
+    expect(first.patterns[0].rows).toHaveLength(16);
+    const notes = first.patterns[0].rows.flat().filter((cell) => cell.note !== null);
+    expect(notes.length).toBeGreaterThan(0);
+    expect(randomSong('gameboy', 8)).not.toEqual(first);
+  });
+
+  it('keeps replaceWithRandom gated on YES for legacy callers', () => {
     const start = newSession('vectrex');
     const blocked = replaceWithRandom(start, 3, 'yes');
     expect(blocked.song).toBe(start.song);
@@ -46,17 +58,6 @@ describe('random song confirm', () => {
     const replaced = replaceWithRandom(start, 3, 'YES');
     expect(replaced.song.name).toBe('Random');
     expect(replaced.song).not.toBe(start.song);
-  });
-
-  it('fills one pattern from a known seed', () => {
-    const first = randomSong('gameboy', 7);
-    const second = randomSong('gameboy', 7);
-    expect(first).toEqual(second);
-    expect(first.patterns).toHaveLength(1);
-    expect(first.patterns[0].rows).toHaveLength(16);
-    const notes = first.patterns[0].rows.flat().filter((cell) => cell.note !== null);
-    expect(notes.length).toBeGreaterThan(0);
-    expect(randomSong('gameboy', 8)).not.toEqual(first);
   });
 });
 

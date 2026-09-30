@@ -2,17 +2,28 @@ import { describe, expect, it } from 'vitest';
 import {
   addInstrument,
   addPattern,
+  addRandomPattern,
   advanceColumn,
   armInstrument,
   clearCell,
+  clearPattern,
+  duplicateBaseName,
+  duplicatePattern,
   enterCut,
   enterNote,
+  followPlaybackOrder,
   loadSong,
   moveCursor,
   newSession,
   newSong,
+  nextBlankPatternName,
+  nextDuplicatePatternName,
   noteFromKey,
+  patternDisplayName,
   redo,
+  removeOrderEntry,
+  renamePattern,
+  reorderOrder,
   selectOrder,
   setChip,
   setName,
@@ -81,6 +92,8 @@ describe('session editing', () => {
     expect(state.octave).toBe(7);
     state = addPattern(state);
     expect(state.song.order).toHaveLength(2);
+    expect(state.song.patterns[1].name).toBe('Pattern 2');
+    expect(state.song.patterns[1].rows.flat().every((cell) => cell.note === null)).toBe(true);
     state = selectOrder(state, 0);
     expect(state.cursor.orderIndex).toBe(0);
     state = addInstrument(state);
@@ -93,6 +106,73 @@ describe('session editing', () => {
     const loaded = loadSong(state, newSong('gameboy'));
     expect(loaded.song.chip).toBe('gameboy');
     expect(loaded.past).toHaveLength(0);
+  });
+
+  it('duplicates, renames, clears, reorders and removes patterns', () => {
+    let state = enterNote(newSession('gameboy'), 60);
+    const firstId = state.song.patterns[0].id;
+    state = duplicatePattern(state);
+    expect(state.song.order).toHaveLength(2);
+    expect(state.song.patterns[1].name).toBe('Pattern 1 (1)');
+    expect(state.song.patterns[1].rows[0][0].note).toBe(60);
+    expect(state.song.patterns[1].id).not.toBe(firstId);
+    state = renamePattern(state, state.song.patterns[1].id, 'Verse');
+    expect(state.song.patterns[1].name).toBe('Verse');
+    state = duplicatePattern(state);
+    expect(state.song.patterns.find((item) => item.id === state.song.order[state.cursor.orderIndex])?.name).toBe('Verse (1)');
+    state = selectOrder(state, 0);
+    state = clearPattern(state);
+    expect(state.song.patterns[0].rows[0][0].note).toBeNull();
+    expect(state.song.patterns[0].name).toBe('Pattern 1');
+    const afterClear = undo(state);
+    expect(afterClear.song.patterns[0].rows[0][0].note).toBe(60);
+    state = reorderOrder(state, 0, 2);
+    expect(state.song.order[2]).toBe(firstId);
+    expect(state.cursor.orderIndex).toBe(2);
+    state = removeOrderEntry(state);
+    expect(state.song.order).toHaveLength(2);
+    expect(state.song.patterns.some((item) => item.id === firstId)).toBe(false);
+    const lone = newSession('gameboy');
+    expect(removeOrderEntry(lone)).toBe(lone);
+  });
+
+  it('adds a random pattern without clearing the song', () => {
+    let state = enterNote(newSession('gameboy'), 60);
+    const kept = state.song.patterns[0].rows[0][0].note;
+    state = addInstrument(state);
+    const armed = state.song.armedInstrumentId;
+    state = addRandomPattern(state, 11);
+    expect(state.song.order).toHaveLength(2);
+    expect(state.song.patterns[0].rows[0][0].note).toBe(kept);
+    expect(state.song.patterns[1].name).toBe('Pattern 2');
+    const notes = state.song.patterns[1].rows.flat().filter((cell) => cell.note !== null);
+    expect(notes.length).toBeGreaterThan(0);
+    expect(notes.every((cell) => cell.instrumentId === armed)).toBe(true);
+    expect(nextBlankPatternName(state.song)).toBe('Pattern 3');
+    expect(nextDuplicatePatternName(state.song, 'Pattern 2')).toBe('Pattern 2 (1)');
+    expect(duplicateBaseName('Pattern 5 (1)')).toBe('Pattern 5');
+    expect(patternDisplayName({ id: 'x', name: '', rows: [] }, 3)).toBe('Pattern 4');
+    expect(renamePattern(state, state.song.patterns[0].id, '   ')).toBe(state);
+    expect(renamePattern(state, state.song.patterns[1].id, 'Pattern 2')).toBe(state);
+    expect(reorderOrder(state, 0, 0)).toBe(state);
+    expect(reorderOrder(state, -1, 0)).toBe(state);
+    state = selectOrder(state, 1);
+    state = reorderOrder(state, 0, 1);
+    expect(state.cursor.orderIndex).toBe(0);
+    state = selectOrder(state, 0);
+    state = reorderOrder(state, 1, 0);
+    expect(state.cursor.orderIndex).toBe(1);
+    const followed = followPlaybackOrder(state, 0, 5);
+    expect(followed.cursor.orderIndex).toBe(0);
+    expect(followed.cursor.row).toBe(5);
+    expect(followPlaybackOrder(followed, 0, 5)).toBe(followed);
+    state = duplicatePattern(selectOrder(addPattern(newSession('gameboy')), 0));
+    state = duplicatePattern(state);
+    expect(state.song.patterns.map((item) => item.name)).toEqual(['Pattern 1', 'Pattern 2', 'Pattern 1 (1)', 'Pattern 1 (2)']);
+    const nameless = newSong('gameboy');
+    nameless.patterns[0] = { ...nameless.patterns[0], name: undefined as unknown as string };
+    const loaded = loadSong(newSession('gameboy'), nameless);
+    expect(loaded.song.patterns[0].name).toBe('Pattern 1');
   });
 
   it('exposes chip definitions', () => {
