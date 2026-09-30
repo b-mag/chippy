@@ -2,7 +2,13 @@
 
 A web tracker for writing Game Boy and Vectrex chiptunes.  I'd like to keep it as simple as LSDJ and support various 8 bit chips.  PS just in case one of the guys from the other day reads this... yes an Index can speed up deletes.
 
-<img width="1032" height="930" alt="Screenshot 2026-09-29 214528" src="https://github.com/user-attachments/assets/af8d5db2-d116-4e6b-ac23-c1782d78bf47" />
+Current state: Tracker and on the other tab a full internet streaming radio - I was thinking in my head I could eventually set it up where people could submit their chip tune creations and I can have this project also stream chiptunes created with the app... allowing users to thumb up or thumb down to further refine song plays/distribution.
+
+<img width="2531" height="1292" alt="Screenshot 2026-09-30 195058" src="https://github.com/user-attachments/assets/1a517183-9b50-4276-93df-ea7d896d6c83" />
+
+Also did some UI tweaking and refinements.
+
+<img width="2551" height="1347" alt="Screenshot 2026-09-30 195152" src="https://github.com/user-attachments/assets/69994e65-a0e3-40f8-9949-bbfdcb14d830" />
 
 
 
