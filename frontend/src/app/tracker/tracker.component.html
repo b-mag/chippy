@@ -3,7 +3,7 @@
     <div class="top-left">
       <h1 class="wordmark">CHIPPY</h1>
       <label>Chip
-        <select [value]="project().chip" (change)="chipChange(($any($event.target)).value)">
+        <select [value]="project().chip" [attr.data-epoch]="chipSelectEpoch()" (change)="chipChange(($any($event.target)).value)">
           @for (id of chips; track id) {
             <option [value]="id">{{ id === 'gameboy' ? 'Game Boy' : 'Vectrex' }}</option>
           }
@@ -146,31 +146,31 @@
   <aside class="instrument" (focusin)="studioFocused.set(true)" (mousedown)="studioFocused.set(true)">
     <h2>Instrument</h2>
 
-    <div class="studio-universal">
-      <ul class="instrument-list">
-        @for (instrument of project().instruments; track instrument.id) {
-          <li>
-            @if (renamingInstrumentId() === instrument.id) {
-              <input
-                class="instrument-rename"
-                [value]="instrumentRenameDraft()"
-                (input)="instrumentRenameDraft.set(($any($event.target)).value)"
-                (keydown)="onInstrumentRenameKey($event, instrument.id)"
-                (blur)="commitInstrumentRename(instrument.id)"
-                #instrumentRenameInput />
-            } @else {
-              <button
-                type="button"
-                [attr.aria-pressed]="instrument.id === project().armedInstrumentId"
-                (click)="session.arm(instrument.id)"
-                (dblclick)="beginInstrumentRename(instrument.id, instrument.name)">
-                {{ instrument.name }}
-              </button>
-            }
-          </li>
-        }
-      </ul>
+    <ul class="instrument-list">
+      @for (instrument of project().instruments; track instrument.id) {
+        <li>
+          @if (renamingInstrumentId() === instrument.id) {
+            <input
+              class="instrument-rename"
+              [value]="instrumentRenameDraft()"
+              (input)="instrumentRenameDraft.set(($any($event.target)).value)"
+              (keydown)="onInstrumentRenameKey($event, instrument.id)"
+              (blur)="commitInstrumentRename(instrument.id)"
+              #instrumentRenameInput />
+          } @else {
+            <button
+              type="button"
+              [attr.aria-pressed]="instrument.id === project().armedInstrumentId"
+              (click)="session.arm(instrument.id)"
+              (dblclick)="beginInstrumentRename(instrument.id, instrument.name)">
+              {{ instrument.name }}
+            </button>
+          }
+        </li>
+      }
+    </ul>
 
+    <div class="instrument-controls">
       <label>Name
         <input
           [value]="armed().name"
@@ -225,30 +225,30 @@
           }
         </div>
       }
-    </div>
 
-    <hr class="studio-sep" />
+      <hr class="studio-sep" />
 
-    <div class="studio-hardware">
-      <h3>{{ chip().label }} · {{ kindLabel(armed().kind) }}</h3>
-      @for (field of hardwareFields(); track field.key) {
-        <label>{{ field.label }}
-          @if (field.control === 'toggle') {
-            <input type="checkbox" [checked]="fieldValue(field.key) === true" (change)="patchField(field.key, ($any($event.target)).checked ? 'true' : 'false', 'toggle')" />
-          } @else if (field.control === 'select') {
-            <select [value]="fieldValue(field.key)" (change)="patchField(field.key, ($any($event.target)).value, 'select')">
-              @for (option of field.options; track option.label) {
-                <option [value]="option.value">{{ option.label }}</option>
-              }
-            </select>
-          } @else {
-            <input type="number" [min]="field.min" [max]="field.max" [value]="fieldValue(field.key)" (change)="patchField(field.key, ($any($event.target)).value, 'number')" />
-          }
-        </label>
-      }
-      @if (hardwareFields().length === 0) {
-        <p class="hardware-empty">No hardware controls for this type.</p>
-      }
+      <div class="studio-hardware">
+        <h3>{{ chip().label }} · {{ kindLabel(armed().kind) }}</h3>
+        @for (field of hardwareFields(); track field.key) {
+          <label>{{ field.label }}
+            @if (field.control === 'toggle') {
+              <input type="checkbox" [checked]="fieldValue(field.key) === true" (change)="patchField(field.key, ($any($event.target)).checked ? 'true' : 'false', 'toggle')" />
+            } @else if (field.control === 'select') {
+              <select [value]="fieldValue(field.key)" (change)="patchField(field.key, ($any($event.target)).value, 'select')">
+                @for (option of field.options; track option.label) {
+                  <option [value]="option.value">{{ option.label }}</option>
+                }
+              </select>
+            } @else {
+              <input type="number" [min]="field.min" [max]="field.max" [value]="fieldValue(field.key)" (change)="patchField(field.key, ($any($event.target)).value, 'number')" />
+            }
+          </label>
+        }
+        @if (hardwareFields().length === 0) {
+          <p class="hardware-empty">No hardware controls for this type.</p>
+        }
+      </div>
     </div>
   </aside>
 

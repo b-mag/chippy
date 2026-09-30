@@ -62,6 +62,8 @@ export class TrackerComponent {
   readonly solo = signal<ReadonlySet<number>>(new Set());
   readonly exportOpen = signal(false);
   readonly presetsOpen = signal(false);
+  /** Bumps when a chip switch is cancelled so the select rebinds to the current chip. */
+  readonly chipSelectEpoch = signal(0);
   readonly renamingId = signal<string | null>(null);
   readonly renameDraft = signal('');
   readonly renamingInstrumentId = signal<string | null>(null);
@@ -509,15 +511,30 @@ export class TrackerComponent {
     if (id === this.project().chip) {
       return;
     }
-    const ok = window.confirm(
-      'Changing chip deletes ALL project data (songs, patterns, and instruments) and starts a new blank project. Continue?',
+    const continueSwitch = window.confirm(
+      'Changing chip starts a blank project for the new chip. Your current songs, patterns, and instruments leave this screen.\n\nOK = continue\nCancel = stay on this chip',
     );
-    if (!ok) {
+    if (!continueSwitch) {
+      this.chipSelectEpoch.update((value) => value + 1);
       return;
+    }
+    const saveFirst = window.confirm(
+      'Save your current project and instruments before switching?\n\nOK = Save, then switch\nCancel = Discard and switch',
+    );
+    void this.finishChipChange(id, saveFirst);
+  }
+
+  private async finishChipChange(id: 'gameboy' | 'vectrex', saveFirst: boolean): Promise<void> {
+    if (saveFirst) {
+      await this.save();
     }
     this.playback.stop();
     this.session.newProjectForChip(id);
-    this.status.set(`New ${id === 'gameboy' ? 'Game Boy' : 'Vectrex'} project.`);
+    this.status.set(
+      saveFirst
+        ? `Saved, then started a new ${id === 'gameboy' ? 'Game Boy' : 'Vectrex'} project.`
+        : `Discarded previous project. New ${id === 'gameboy' ? 'Game Boy' : 'Vectrex'} project.`,
+    );
   }
 
   addPreset(preset: InstrumentPreset): void {

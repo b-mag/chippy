@@ -195,15 +195,6 @@ app-tracker { display: block; height: 100%; }
   font-family: ui-monospace, monospace;
 }
 
-.studio-universal {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 0;
-  overflow: auto;
-}
-
 .studio-sep {
   border: none;
   border-top: 1px solid var(--cell-edge);
@@ -212,12 +203,11 @@ app-tracker { display: block; height: 100%; }
 }
 
 .studio-hardware {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  max-height: 12rem;
+  overflow-y: auto;
 }
 
 .studio-hardware h3 {
@@ -235,12 +225,13 @@ app-tracker { display: block; height: 100%; }
 
 .instrument-list {
   list-style: none;
-  margin: 0;
+  margin: 0 0 10px;
   padding: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: 8rem;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -258,6 +249,16 @@ app-tracker { display: block; height: 100%; }
 .instrument-rename {
   width: 100%;
   min-height: 2.25rem;
+}
+
+.instrument-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding-top: 4px;
+  border-top: 1px solid var(--cell-edge);
+  min-height: 0;
 }
 
 .audition-strip {
