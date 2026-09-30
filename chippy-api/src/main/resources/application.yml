@@ -23,6 +23,9 @@ chippy:
     provider: adsense
     client-id: ""
     slot-id: ""
+  presets:
+    # true unlocks premium packs without a support perk (use in local/dev)
+    unlock-all: false
   rate-limit:
     validate-per-minute: 30
     api-per-minute: 120

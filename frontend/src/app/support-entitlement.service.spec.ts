@@ -41,4 +41,14 @@ describe('SupportEntitlementService', () => {
     expect((await entitlement(adsOn, false)).shouldShowAds()).toBe(true);
     expect((await entitlement(adsOn, true)).shouldShowAds()).toBe(false);
   });
+
+  it('unlocks premium presets via perk or unlockAll', async () => {
+    const locked: AppConfig = {
+      ...DEFAULT_APP_CONFIG,
+      presets: { unlockAll: false },
+    };
+    expect((await entitlement(locked, false)).canUsePremiumPresets()).toBe(false);
+    expect((await entitlement(locked, true)).canUsePremiumPresets()).toBe(true);
+    expect((await entitlement(DEFAULT_APP_CONFIG, false)).canUsePremiumPresets()).toBe(true);
+  });
 });

@@ -1,6 +1,6 @@
 import { chipDefinition } from './chips';
-import { newSong } from './song-factory';
-import type { ChipId, Pattern, Song } from './types';
+import { newProject, songForRender } from './song-factory';
+import type { ChipId, Pattern, Project, Song } from './types';
 import { PATTERN_ROWS } from './types';
 
 /** Deterministic generator so a test can demand a known pattern. */
@@ -39,12 +39,17 @@ export function fillPatternRandom(pattern: Pattern, chip: ChipId, instrumentId: 
   }
 }
 
+/** One song, default instrument, notes scattered on every channel the chip has. */
+export function randomProject(chip: ChipId, seed: number): Project {
+  const project = newProject(chip, 'Random');
+  const body = project.songs[0];
+  fillPatternRandom(body.patterns[0], chip, project.armedInstrumentId, seed);
+  return project;
+}
+
 /**
- * One 16-row pattern, default instrument, notes scattered on every channel
- * the selected chip actually has. Kept for deterministic tests.
+ * Flat render view of a random project. Kept for deterministic tests that still use Song.
  */
 export function randomSong(chip: ChipId, seed: number): Song {
-  const song = newSong(chip, 'Random');
-  fillPatternRandom(song.patterns[0], chip, song.armedInstrumentId, seed);
-  return song;
+  return songForRender(randomProject(chip, seed));
 }

@@ -3,17 +3,26 @@
     <div class="top-left">
       <h1 class="wordmark">CHIPPY</h1>
       <label>Chip
-        <select [value]="state().song.chip" (change)="chipChange(($any($event.target)).value)">
+        <select [value]="project().chip" (change)="chipChange(($any($event.target)).value)">
           @for (id of chips; track id) {
             <option [value]="id">{{ id === 'gameboy' ? 'Game Boy' : 'Vectrex' }}</option>
           }
         </select>
       </label>
-      <label>Name
-        <input [value]="state().song.name" (change)="sessionName(($any($event.target)).value)" />
+      <label>Project
+        <input [value]="project().name" (change)="sessionName(($any($event.target)).value)" />
       </label>
+      <label>Song
+        <select [value]="project().activeSongId" (change)="session.selectSong(($any($event.target)).value)">
+          @for (song of project().songs; track song.id) {
+            <option [value]="song.id">{{ song.name }}</option>
+          }
+        </select>
+      </label>
+      <button type="button" (click)="session.addSong()">Add song</button>
+      <button type="button" [disabled]="project().songs.length <= 1" (click)="session.removeSong()">Remove song</button>
       <label>Tempo
-        <input type="number" min="40" max="240" [value]="state().song.tempo" (change)="sessionTempo(($any($event.target)).value)" />
+        <input type="number" min="40" max="240" [value]="songBody().tempo" (change)="sessionTempo(($any($event.target)).value)" />
       </label>
       <label>Octave {{ state().octave }}</label>
       <button type="button" (click)="play(false)">Play</button>
@@ -41,15 +50,14 @@
 
   @if (exportOpen()) {
     <div class="menu">
-      <button type="button" (click)="exportFile('wav')">WAV</button>
-      <button type="button" (click)="exportFile('ym')">YM6</button>
-      <button type="button" (click)="exportFile('vgm')">VGM</button>
-      <button type="button" (click)="exportFile('aky')">Vectrex AKY</button>
+      @for (item of exportKinds(); track item.id) {
+        <button type="button" (click)="exportFile(item.id)">{{ item.label }}</button>
+      }
     </div>
   }
 
   <aside class="order">
-    <h2>Order</h2>
+    <h2>Song Order</h2>
     <ol class="order-list"
       (dragover)="onOrderDragOver($event)"
       (drop)="onOrderDrop($event)">
@@ -91,16 +99,21 @@
       <button type="button" (click)="session.addRandomPattern()">Add new pattern with random notes</button>
       <button type="button" (click)="session.duplicatePattern()">Copy/Paste Pattern</button>
       <button type="button" (click)="session.clearPattern()">Clear Pattern</button>
-      <button type="button" [disabled]="state().song.order.length <= 1" (click)="session.removePattern()">Remove pattern</button>
+      <button type="button" [disabled]="songBody().order.length <= 1" (click)="session.removePattern()">Remove pattern</button>
     </div>
   </aside>
 
-  <section class="grid" role="grid" aria-label="Pattern">
+  <section class="grid" role="grid" aria-label="Pattern" (focusin)="studioFocused.set(false)">
     <div class="grid-head" role="row">
       <span></span>
       @for (channel of chip().channels; track channel.id; let index = $index) {
         <span class="channel-head" role="columnheader">
-          {{ channel.label }}
+          <span class="channel-title">
+            {{ channel.label }}
+            @if (channel.alias) {
+              <span class="channel-alias">{{ channel.alias }}</span>
+            }
+          </span>
           <span class="channel-toggles">
             <button type="button" class="btn-mute" (click)="toggleChannel('mute', index)">{{ muted().has(index) ? 'Unmute' : 'Mute' }}</button>
             <button type="button" class="btn-solo" (click)="toggleChannel('solo', index)">{{ solo().has(index) ? 'Unsolo' : 'Solo' }}</button>
@@ -130,21 +143,95 @@
     }
   </section>
 
-  <aside class="instrument">
+  <aside class="instrument" (focusin)="studioFocused.set(true)" (mousedown)="studioFocused.set(true)">
     <h2>Instrument</h2>
-    <ul>
-      @for (instrument of state().song.instruments; track instrument.id) {
-        <li>
-          <button type="button" [attr.aria-pressed]="instrument.id === state().song.armedInstrumentId" (click)="session.arm(instrument.id)">{{ instrument.name }}</button>
-        </li>
+
+    <div class="studio-universal">
+      <ul class="instrument-list">
+        @for (instrument of project().instruments; track instrument.id) {
+          <li>
+            @if (renamingInstrumentId() === instrument.id) {
+              <input
+                class="instrument-rename"
+                [value]="instrumentRenameDraft()"
+                (input)="instrumentRenameDraft.set(($any($event.target)).value)"
+                (keydown)="onInstrumentRenameKey($event, instrument.id)"
+                (blur)="commitInstrumentRename(instrument.id)"
+                #instrumentRenameInput />
+            } @else {
+              <button
+                type="button"
+                [attr.aria-pressed]="instrument.id === project().armedInstrumentId"
+                (click)="session.arm(instrument.id)"
+                (dblclick)="beginInstrumentRename(instrument.id, instrument.name)">
+                {{ instrument.name }}
+              </button>
+            }
+          </li>
+        }
+      </ul>
+
+      <label>Name
+        <input
+          [value]="armed().name"
+          (change)="session.renameInstrument(armed().id, ($any($event.target)).value)" />
+      </label>
+
+      <label>Type
+        <select [value]="armed().kind" (change)="changeKind(($any($event.target)).value)">
+          @for (kind of kindOptions(); track kind) {
+            <option [value]="kind">{{ kindLabel(kind) }}</option>
+          }
+        </select>
+      </label>
+
+      <div class="audition-strip" aria-label="Audition">
+        <span class="audition-label">Test</span>
+        <button type="button" (click)="session.octave(state().octave - 1)">Oct −</button>
+        <button type="button" (click)="session.octave(state().octave + 1)">Oct +</button>
+        @for (semitone of [0, 2, 4, 5, 7, 9, 11]; track semitone) {
+          <button type="button" class="note-key" (click)="auditionNoteOffset(semitone)">
+            {{ ['C','D','E','F','G','A','B'][$index] }}
+          </button>
+        }
+      </div>
+      <p class="audition-hint">Keys Z–M / Q–U test the armed sound here without writing the grid.</p>
+
+      <div class="instrument-actions">
+        <button type="button" (click)="session.addInstrument()">Add instrument</button>
+        <button type="button" (click)="presetsOpen.set(!presetsOpen())">Add from presets…</button>
+        <button type="button" [disabled]="project().instruments.length <= 1" (click)="deleteArmed()">Delete instrument</button>
+        @if (showSnip()) {
+          <a class="snip-link" routerLink="/listen">Snip a YM</a>
+        }
+      </div>
+
+      @if (presetsOpen()) {
+        <div class="preset-menu">
+          @for (preset of presets(); track preset.id) {
+            <button
+              type="button"
+              class="preset-item"
+              [class.locked]="preset.premium && !premiumUnlocked()"
+              (click)="addPreset(preset)">
+              {{ preset.name }}
+              @if (preset.premium) {
+                <span class="preset-tag">{{ premiumUnlocked() ? 'Premium' : 'Locked' }}</span>
+              }
+            </button>
+          }
+          @if (presetStatus()) {
+            <p class="preset-status">{{ presetStatus() }}</p>
+          }
+        </div>
       }
-    </ul>
-    <div class="instrument-actions">
-      <button type="button" (click)="session.addInstrument()">Add instrument</button>
-      <a class="snip-link" routerLink="/listen">Snip a YM</a>
     </div>
-    @for (field of chip().fields; track field.key) {
-      @if (field.kinds.includes(armed().kind) && (!field.channelId || field.channelId === chip().channels[state().cursor.channel].id)) {
+
+    <hr class="studio-sep" />
+
+    <div class="studio-hardware">
+      <h3>{{ chip().label }} · {{ kindLabel(armed().kind) }}</h3>
+      @for (field of hardwareFields(); track field.key) {
         <label>{{ field.label }}
           @if (field.control === 'toggle') {
             <input type="checkbox" [checked]="fieldValue(field.key) === true" (change)="patchField(field.key, ($any($event.target)).checked ? 'true' : 'false', 'toggle')" />
@@ -159,7 +246,10 @@
           }
         </label>
       }
-    }
+      @if (hardwareFields().length === 0) {
+        <p class="hardware-empty">No hardware controls for this type.</p>
+      }
+    </div>
   </aside>
 
   <p class="hint">Z through M play notes. Q through U is the next octave. Arrows move. Backtick cuts the note. Space plays. Ctrl+Z undoes. Ctrl+Y or Ctrl+Shift+Z redoes. Octave {{ state().octave }}.</p>

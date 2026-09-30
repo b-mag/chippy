@@ -14,5 +14,8 @@
     "provider": "adsense",
     "clientId": "",
     "slotId": ""
+  },
+  "presets": {
+    "unlockAll": true
   }
 }

@@ -42,4 +42,9 @@ describe('normalizeAppConfig', () => {
     });
     expect(config.coffee.delayMinutes).toBe(5);
   });
+
+  it('defaults presets.unlockAll to true and honors false', () => {
+    expect(normalizeAppConfig({}).presets.unlockAll).toBe(true);
+    expect(normalizeAppConfig({ presets: { unlockAll: false } }).presets.unlockAll).toBe(false);
+  });
 });

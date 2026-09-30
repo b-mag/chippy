@@ -52,10 +52,17 @@ app-tracker { display: block; height: 100%; }
 
 .file input { width: 100%; max-width: none; }
 
-.order, .instrument { padding: 12px; overflow: auto; }
+.order, .instrument {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .grid { overflow: auto; padding: 8px; background: var(--cell); }
 
-.order h2, .instrument h2 { margin: 0 0 8px; font-size: 1rem; }
+.order h2, .instrument h2 { margin: 0 0 8px; font-size: 1rem; flex: 0 0 auto; }
 
 .order-list {
   list-style: none;
@@ -65,6 +72,9 @@ app-tracker { display: block; height: 100%; }
   flex-direction: column;
   gap: 4px;
   min-height: 2rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .order-slot {
@@ -128,6 +138,9 @@ app-tracker { display: block; height: 100%; }
   display: flex;
   flex-direction: column;
   gap: 6px;
+  flex: 0 0 auto;
+  padding-top: 4px;
+  border-top: 1px solid var(--cell-edge);
 }
 
 .order-actions button {
@@ -170,31 +183,112 @@ app-tracker { display: block; height: 100%; }
 .cell.cursor { box-shadow: inset 0 0 0 2px var(--cursor); }
 .playhead { background: color-mix(in srgb, var(--playhead) 28%, transparent); }
 
-.instrument ul {
+.channel-title {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.channel-alias {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+}
+
+.studio-universal {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.studio-sep {
+  border: none;
+  border-top: 1px solid var(--cell-edge);
+  margin: 10px 0;
+  flex: 0 0 auto;
+}
+
+.studio-hardware {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.studio-hardware h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.hardware-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.instrument-list {
   list-style: none;
-  margin: 0 0 8px;
+  margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  max-height: 8rem;
+  overflow-y: auto;
 }
 
-.instrument ul button {
+.instrument-list button {
   width: 100%;
   text-align: left;
 }
 
-.instrument ul button[aria-pressed='true'] {
+.instrument-list button[aria-pressed='true'] {
   background: color-mix(in srgb, var(--cursor) 28%, var(--cell));
   border-color: var(--cursor);
   font-weight: 600;
+}
+
+.instrument-rename {
+  width: 100%;
+  min-height: 2.25rem;
+}
+
+.audition-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.audition-label {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-right: 2px;
+}
+
+.note-key {
+  min-width: 1.8rem;
+  padding: 4px 6px;
+}
+
+.audition-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+  line-height: 1.3;
 }
 
 .instrument-actions {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-bottom: 10px;
 }
 
 .instrument-actions button,
@@ -211,6 +305,43 @@ app-tracker { display: block; height: 100%; }
   border-radius: 6px;
   padding: 6px 10px;
   box-sizing: border-box;
+}
+
+.preset-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 10rem;
+  overflow-y: auto;
+  border: 1px solid var(--cell-edge);
+  border-radius: 6px;
+  padding: 6px;
+  background: var(--cell);
+}
+
+.preset-item {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.preset-item.locked {
+  opacity: 0.65;
+}
+
+.preset-tag {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.preset-status {
+  margin: 4px 0 0;
+  font-size: 0.75rem;
+  color: var(--muted);
 }
 
 .hint, .status { margin: 0; color: var(--muted); }

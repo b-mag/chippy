@@ -15,6 +15,8 @@ export interface InstrumentField {
 export interface ChipChannel {
   id: string;
   label: string;
+  /** Short alias shown beside the label when useful (e.g. PU1). */
+  alias?: string;
 }
 
 export interface ChipDefinition {
@@ -25,8 +27,13 @@ export interface ChipDefinition {
   /** How often a full register frame is emitted while rendering. */
   frameRate: number;
   channels: ChipChannel[];
+  /** Instrument kinds this chip can create. */
+  kinds: InstrumentKind[];
   fields: InstrumentField[];
   createDefaultInstrument(): Instrument;
+  createInstrument(kind: InstrumentKind): Instrument;
+  /** Kinds legal on the given channel id. */
+  kindsForChannel(channelId: string): InstrumentKind[];
 }
 
 const dutyOptions = [
@@ -58,6 +65,23 @@ function baseInstrument(partial: Partial<Instrument> & Pick<Instrument, 'id' | '
   };
 }
 
+function gameboyInstrument(kind: InstrumentKind): Instrument {
+  if (kind === 'wave') {
+    return baseInstrument({ id: 'ins-1', name: 'Wave', kind: 'wave', envelopeStart: 15, envelopeDown: false, envelopePeriod: 0 });
+  }
+  if (kind === 'noise') {
+    return baseInstrument({ id: 'ins-1', name: 'Noise', kind: 'noise', envelopeStart: 10, envelopePeriod: 2 });
+  }
+  return baseInstrument({ id: 'ins-1', name: 'Pulse lead', kind: 'pulse' });
+}
+
+function vectrexInstrument(kind: InstrumentKind): Instrument {
+  if (kind === 'snip') {
+    return baseInstrument({ id: 'ins-1', name: 'Snip', kind: 'snip', envelopeDown: false, envelopePeriod: 0, frames: [] });
+  }
+  return baseInstrument({ id: 'ins-1', name: 'Tone', kind: 'tone', envelopeDown: false, envelopePeriod: 0 });
+}
+
 const gameboy: ChipDefinition = {
   id: 'gameboy',
   label: 'Game Boy',
@@ -65,11 +89,12 @@ const gameboy: ChipDefinition = {
   clockHz: 4_194_304,
   frameRate: 60,
   channels: [
-    { id: 'pulse1', label: 'Pulse 1' },
-    { id: 'pulse2', label: 'Pulse 2' },
-    { id: 'wave', label: 'Wave' },
-    { id: 'noise', label: 'Noise' },
+    { id: 'pulse1', label: 'Pulse 1', alias: 'PU1' },
+    { id: 'pulse2', label: 'Pulse 2', alias: 'PU2' },
+    { id: 'wave', label: 'Wave', alias: 'WAV' },
+    { id: 'noise', label: 'Noise', alias: 'NOI' },
   ],
+  kinds: ['pulse', 'wave', 'noise'],
   fields: [
     { key: 'duty', label: 'Duty', control: 'select', options: dutyOptions, kinds: ['pulse'] },
     envelopeStart,
@@ -93,7 +118,22 @@ const gameboy: ChipDefinition = {
     { key: 'noiseShort', label: 'Short noise', control: 'toggle', kinds: ['noise'] },
   ],
   createDefaultInstrument() {
-    return baseInstrument({ id: 'ins-1', name: 'Pulse lead', kind: 'pulse' });
+    return gameboyInstrument('pulse');
+  },
+  createInstrument(kind: InstrumentKind) {
+    if (!this.kinds.includes(kind)) {
+      return this.createDefaultInstrument();
+    }
+    return gameboyInstrument(kind);
+  },
+  kindsForChannel(channelId: string) {
+    if (channelId === 'wave') {
+      return ['wave'];
+    }
+    if (channelId === 'noise') {
+      return ['noise'];
+    }
+    return ['pulse'];
   },
 };
 
@@ -108,13 +148,23 @@ const vectrex: ChipDefinition = {
     { id: 'tone2', label: 'Tone 2' },
     { id: 'tone3', label: 'Tone 3' },
   ],
+  kinds: ['tone', 'snip'],
   fields: [
     envelopeStart,
     { key: 'hardwareEnvelope', label: 'Hardware envelope', control: 'toggle', kinds: ['tone'] },
     { key: 'mixNoise', label: 'Noise', control: 'toggle', kinds: ['tone'] },
   ],
   createDefaultInstrument() {
-    return baseInstrument({ id: 'ins-1', name: 'Tone', kind: 'tone', envelopeDown: false, envelopePeriod: 0 });
+    return vectrexInstrument('tone');
+  },
+  createInstrument(kind: InstrumentKind) {
+    if (!this.kinds.includes(kind)) {
+      return this.createDefaultInstrument();
+    }
+    return vectrexInstrument(kind);
+  },
+  kindsForChannel() {
+    return ['tone', 'snip'];
   },
 };
 
@@ -126,6 +176,19 @@ export function chipDefinition(id: ChipId): ChipDefinition {
 
 export function chipIds(): ChipId[] {
   return ['gameboy', 'vectrex'];
+}
+
+/** First channel id that can play this instrument kind on the chip. */
+export function auditionChannelId(chip: ChipId, kind: InstrumentKind): string {
+  const definition = chipDefinition(chip);
+  const match = definition.channels.find((channel) => definition.kindsForChannel(channel.id).includes(kind));
+  return match?.id ?? definition.channels[0].id;
+}
+
+export function auditionChannelIndex(chip: ChipId, kind: InstrumentKind): number {
+  const definition = chipDefinition(chip);
+  const id = auditionChannelId(chip, kind);
+  return Math.max(0, definition.channels.findIndex((channel) => channel.id === id));
 }
 
 export { baseInstrument };

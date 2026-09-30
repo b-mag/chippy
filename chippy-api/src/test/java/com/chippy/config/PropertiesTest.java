@@ -63,4 +63,12 @@ class PropertiesTest {
         splash.setEnabled(false);
         assertFalse(splash.isEnabled());
     }
+
+    @Test
+    void presetsUnlockToggle() {
+        PresetsProperties presets = new PresetsProperties();
+        assertFalse(presets.isUnlockAll());
+        presets.setUnlockAll(true);
+        assertTrue(presets.isUnlockAll());
+    }
 }

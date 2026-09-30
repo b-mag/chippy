@@ -2,6 +2,7 @@ package com.chippy.web;
 
 import com.chippy.config.AdsProperties;
 import com.chippy.config.CoffeeProperties;
+import com.chippy.config.PresetsProperties;
 import com.chippy.config.SplashProperties;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,14 +17,17 @@ public class ConfigController {
     private final SplashProperties splashProperties;
     private final CoffeeProperties coffeeProperties;
     private final AdsProperties adsProperties;
+    private final PresetsProperties presetsProperties;
 
     public ConfigController(
             SplashProperties splashProperties,
             CoffeeProperties coffeeProperties,
-            AdsProperties adsProperties) {
+            AdsProperties adsProperties,
+            PresetsProperties presetsProperties) {
         this.splashProperties = splashProperties;
         this.coffeeProperties = coffeeProperties;
         this.adsProperties = adsProperties;
+        this.presetsProperties = presetsProperties;
     }
 
     /** Overrides the static config.json when Spring is the page server. */
@@ -44,10 +48,14 @@ public class ConfigController {
         ads.put("clientId", adsProperties.getClientId());
         ads.put("slotId", adsProperties.getSlotId());
 
+        Map<String, Object> presets = new LinkedHashMap<>();
+        presets.put("unlockAll", presetsProperties.isUnlockAll());
+
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("splashEnabled", splashProperties.isEnabled());
         body.put("coffee", coffee);
         body.put("ads", ads);
+        body.put("presets", presets);
         return body;
     }
 

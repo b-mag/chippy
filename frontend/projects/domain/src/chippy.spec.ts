@@ -1,21 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
+  activeSongBody,
   addSnipInstrument,
   confirmationAccepted,
   enterNote,
   formatNote,
+  newProject,
   newSession,
-  newSong,
   noteFromKey,
   randomSong,
   replaceWithRandom,
+  songForRender,
 } from '@chippy/domain';
 import { ayPeriod, gbFrequency, renderSong } from '@chippy/engines';
 import { AkyUnsupportedError, encodeAky, encodeVgm, encodeWav, encodeYm6, parseYm, renderPcm } from '@chippy/files';
 
 describe('new project', () => {
   it('arms a default instrument on a 16-row pattern', () => {
-    const song = newSong('gameboy');
+    const song = songForRender(newProject('gameboy'));
     expect(song.instruments).toHaveLength(1);
     expect(song.armedInstrumentId).toBe(song.instruments[0].id);
     expect(song.patterns[0].rows).toHaveLength(16);
@@ -31,9 +33,9 @@ describe('note entry', () => {
     expect(formatNote(60)).toBe('C-4');
     const next = enterNote(start, midi!);
     expect(next.cursor.row).toBe(1);
-    expect(next.song.patterns[0].rows[0][0].note).toBe(60);
-    expect(next.song.patterns[0].rows[0][0].instrumentId).toBe(start.song.armedInstrumentId);
-    expect(start.song.patterns[0].rows[0][0].note).toBeNull();
+    expect(activeSongBody(next.project).patterns[0].rows[0][0].note).toBe(60);
+    expect(activeSongBody(next.project).patterns[0].rows[0][0].instrumentId).toBe(start.project.armedInstrumentId);
+    expect(activeSongBody(start.project).patterns[0].rows[0][0].note).toBeNull();
   });
 });
 
@@ -53,25 +55,25 @@ describe('random pattern fill', () => {
   it('keeps replaceWithRandom gated on YES for legacy callers', () => {
     const start = newSession('vectrex');
     const blocked = replaceWithRandom(start, 3, 'yes');
-    expect(blocked.song).toBe(start.song);
+    expect(blocked.project).toBe(start.project);
     expect(confirmationAccepted('YES')).toBe(true);
     const replaced = replaceWithRandom(start, 3, 'YES');
-    expect(replaced.song.name).toBe('Random');
-    expect(replaced.song).not.toBe(start.song);
+    expect(replaced.project.name).toBe('Random');
+    expect(replaced.project).not.toBe(start.project);
   });
 });
 
 describe('snip', () => {
   it('does not change the open song until the instrument is added', () => {
-    const song = newSong('vectrex');
-    const before = song.instruments.length;
+    const project = newProject('vectrex');
+    const before = project.instruments.length;
     const frames = [new Array(16).fill(0)];
     frames[0][0] = 0xd5;
     frames[0][8] = 12;
-    const added = addSnipInstrument(song, 'Hit', frames);
-    expect(song.instruments).toHaveLength(before);
-    expect(added.song.instruments).toHaveLength(before + 1);
-    expect(added.song.armedInstrumentId).toBe(added.instrumentId);
+    const added = addSnipInstrument(project, 'Hit', frames);
+    expect(project.instruments).toHaveLength(before);
+    expect(added.project.instruments).toHaveLength(before + 1);
+    expect(added.project.armedInstrumentId).toBe(added.instrumentId);
   });
 });
 
@@ -82,7 +84,7 @@ describe('chip timing', () => {
 
   it('renders a Vectrex note into the tone period registers', () => {
     const state = enterNote(newSession('vectrex'), 69);
-    const rendered = renderSong(state.song);
+    const rendered = renderSong(songForRender(state.project));
     expect(rendered.chip).toBe('vectrex');
     if (rendered.chip !== 'vectrex') {
       return;
@@ -114,7 +116,7 @@ describe('exports', () => {
 
   it('writes a VGM header and a WAV header', () => {
     const state = enterNote(newSession('gameboy'), 60);
-    const rendered = renderSong(state.song);
+    const rendered = renderSong(songForRender(state.project));
     if (rendered.chip !== 'gameboy') {
       throw new Error('expected game boy');
     }

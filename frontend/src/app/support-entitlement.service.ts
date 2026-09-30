@@ -19,4 +19,9 @@ export class SupportEntitlementService {
       && ads.slotId.trim().length > 0
       && !this.auth.hasSupportPerk();
   }
+
+  /** Premium instrument packs: support perk or local unlockAll flag. */
+  canUsePremiumPresets(): boolean {
+    return this.auth.hasSupportPerk() || this.config.config().presets.unlockAll;
+  }
 }

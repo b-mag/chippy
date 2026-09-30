@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { enterNote, newSession, newSong } from '@chippy/domain';
+import { enterNote, newProject, newSession, songForRender } from '@chippy/domain';
 import { renderSong } from '@chippy/engines';
 import {
   a4Hz,
@@ -18,26 +18,61 @@ import {
 import type { AyFrame, GbFrame } from '@chippy/engines';
 
 describe('project file', () => {
-  it('round-trips a song and rejects unknown fields', () => {
-    const song = newSong('gameboy');
-    const text = serializeProject(song);
+  it('round-trips a project, migrates v1, and rejects unknown fields', () => {
+    const project = newProject('gameboy');
+    const text = serializeProject(project);
     expect(parseProject(text).chip).toBe('gameboy');
+    expect(parseProject(text).songs).toHaveLength(1);
     expect(() => parseProject('{')).toThrow(/JSON/);
     expect(() => parseProject('[]')).toThrow(/object/);
-    expect(() => parseProject(JSON.stringify({ ...song, virus: true }))).toThrow(/Unknown/);
-    expect(() => parseProject(JSON.stringify({ ...song, version: 99 }))).toThrow(/version/);
-    expect(() => parseProject(JSON.stringify({ ...song, chip: 'c64' }))).toThrow(/chip/);
-    expect(downloadName({ ...song, name: 'My Song!' }, 'json')).toBe('My-Song.json');
-    expect(downloadName({ ...song, name: '!!!' }, 'json')).toBe('chippy.json');
-    const legacy = JSON.parse(text) as { patterns: Array<Record<string, unknown>> };
-    delete legacy.patterns[0]['name'];
-    expect(parseProject(JSON.stringify(legacy)).patterns[0].name).toBe('Pattern 1');
+    expect(() => parseProject(JSON.stringify({ ...project, virus: true }))).toThrow(/Unknown/);
+    expect(() => parseProject(JSON.stringify({ ...project, version: 99 }))).toThrow(/version/);
+    expect(() => parseProject(JSON.stringify({ ...project, chip: 'c64' }))).toThrow(/chip/);
+    expect(downloadName({ ...project, name: 'My Song!' }, 'json')).toBe('My-Song.json');
+    expect(downloadName({ ...project, name: '!!!' }, 'json')).toBe('chippy.json');
+    const legacy = {
+      version: 1,
+      name: 'Legacy',
+      chip: 'gameboy',
+      tempo: 120,
+      order: ['pat-1'],
+      patterns: [{ id: 'pat-1', rows: project.songs[0].patterns[0].rows }],
+      instruments: project.instruments,
+      armedInstrumentId: project.armedInstrumentId,
+    };
+    const migrated = parseProject(JSON.stringify(legacy));
+    expect(migrated.version).toBe(2);
+    expect(migrated.songs[0].patterns[0].name).toBe('Pattern 1');
+    const v2 = parseProject(text);
+    expect(parseProject(JSON.stringify({
+      ...v2,
+      songs: [{ id: 'song-1', name: 'A', tempo: 100, order: ['pat-1'], patterns: [{ id: 'pat-1', rows: project.songs[0].patterns[0].rows }] }],
+      activeSongId: 'missing',
+    })).activeSongId).toBe('song-1');
+    expect(() => parseProject(JSON.stringify({
+      version: 2,
+      name: 'X',
+      chip: 'gameboy',
+      instruments: project.instruments,
+      armedInstrumentId: project.armedInstrumentId,
+      songs: [{ id: 'song-1', name: 'A', tempo: 120, order: [], patterns: [] }],
+      activeSongId: 'song-1',
+    }))).toThrow(/order|patterns/);
+    expect(() => parseProject(JSON.stringify({
+      version: 2,
+      name: 'X',
+      chip: 'gameboy',
+      instruments: [],
+      armedInstrumentId: 'ins-1',
+      songs: v2.songs,
+      activeSongId: v2.activeSongId,
+    }))).toThrow(/instruments/);
   });
 });
 
 describe('export helpers', () => {
   it('exports wav and vgm for game boy', () => {
-    const song = enterNote(newSession('gameboy'), 60).song;
+    const song = songForRender(enterNote(newSession('gameboy'), 60).project);
     const wav = exportWav(song);
     expect(wav.filename.endsWith('.wav')).toBe(true);
     expect(exportVgm(song).filename.endsWith('.vgm')).toBe(true);
@@ -46,7 +81,7 @@ describe('export helpers', () => {
   });
 
   it('exports ym and aky for vectrex', () => {
-    const song = enterNote(newSession('vectrex'), 69).song;
+    const song = songForRender(enterNote(newSession('vectrex'), 69).project);
     expect(exportYm(song).bytes[0]).toBe('Y'.charCodeAt(0));
     const aky = exportAky(song);
     expect(aky.songFile.filename.endsWith('.asm')).toBe(true);

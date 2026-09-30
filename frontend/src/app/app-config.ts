@@ -15,10 +15,16 @@ export interface AdsConfig {
   slotId: string;
 }
 
+export interface PresetsConfig {
+  /** When true, premium instrument packs unlock without a support perk. */
+  unlockAll: boolean;
+}
+
 export interface AppConfig {
   splashEnabled: boolean;
   coffee: CoffeeConfig;
   ads: AdsConfig;
+  presets: PresetsConfig;
 }
 
 export const DEFAULT_APP_CONFIG: AppConfig = {
@@ -38,11 +44,15 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
     clientId: '',
     slotId: '',
   },
+  presets: {
+    unlockAll: true,
+  },
 };
 
 export function normalizeAppConfig(raw: Partial<AppConfig> | null | undefined): AppConfig {
   const coffee = raw?.coffee ?? {};
   const ads = raw?.ads ?? {};
+  const presets = raw?.presets ?? {};
   const delay = Number((coffee as CoffeeConfig).delayMinutes);
   return {
     splashEnabled: raw?.splashEnabled !== false,
@@ -60,6 +70,9 @@ export function normalizeAppConfig(raw: Partial<AppConfig> | null | undefined): 
       provider: String((ads as AdsConfig).provider || 'adsense'),
       clientId: String((ads as AdsConfig).clientId ?? ''),
       slotId: String((ads as AdsConfig).slotId ?? ''),
+    },
+    presets: {
+      unlockAll: (presets as PresetsConfig).unlockAll !== false,
     },
   };
 }

@@ -9,12 +9,15 @@ A web tracker for writing Game Boy and Vectrex chiptunes.  I'd like to keep it a
 
 ## What it can do
 
-- One screen with the order list, every channel, and the instrument.
-- Game Boy (two pulse channels, wave, noise) and Vectrex (three tone channels).
+- One screen with Song Order, every channel, and the instrument studio.
+- A project holds one chip, a shared instrument bank, and one or more songs.
+- Game Boy (PU1/PU2/WAV/NOI) and Vectrex (three tone channels).
+- Instrument studio: rename/type/delete, pitch audition, chip-specific hardware controls, free and premium presets (`presets.unlockAll` in config unlocks premium for local/dev).
+- Changing chip starts a new blank project after confirm. Opening a project warns when the session is dirty.
 - The keyboard plays a note as you write it. Undo, mute, and solo are on that screen.
 - Vaporwave, dark, and plain paint, chosen from a Paint dropdown (defaults to vaporwave).
 - A short opening animation. Set `splashEnabled` to `false` in `frontend/public/config.json`, or `chippy.splash.enabled` in `chippy-api/src/main/resources/application.yml`.
-- Save a `.chippy.json` project and open one again. Uploads are parsed and rejected when they are not a project or a YM file.
+- Save a `.chippy.json` project (v2) and open one again. Legacy v1 song files migrate on open. Uploads are parsed and rejected when they are not a project or a YM file.
 - Create a random song after a warning and typing YES.
 - Export WAV, YM6, Game Boy VGM, and a Vectrex AKY assembly file plus player config.
 - Open a YM beside the song, play a range, and keep it as an instrument.
@@ -25,8 +28,8 @@ A web tracker for writing Game Boy and Vectrex chiptunes.  I'd like to keep it a
 
 - More chips (C64, NES, Atari ST), snip on those chips, and a dedicated YM Player.
 - YM Radio (rotation, submit/approve, thumbs, visualization).
-- Deeper tracker tools such as tables and grooves. Chains are not required to write a loop, so they are not on the first screen.
-- Real sign-in so donors can use an ad-free session.
+- Deeper tracker tools such as tables, grooves, and Chains. LSDJ `.SAV` / `.lsdsng` bridge.
+- Real sign-in so donors can use an ad-free session and premium presets without `unlockAll`.
 
 ## Run it locally
 
