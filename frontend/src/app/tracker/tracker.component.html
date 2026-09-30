@@ -26,11 +26,13 @@
     <button type="button" (click)="exportOpen.set(!exportOpen())">Export</button>
     <button type="button" (click)="randomStage.set('warn')">Create random song</button>
     <a routerLink="/listen">Snip a YM</a>
-    <div class="aesthetics" role="group" aria-label="Aesthetic">
-      @for (choice of aesthetics.choices; track choice) {
-        <button type="button" [attr.aria-pressed]="aesthetics.current() === choice" (click)="aesthetic(choice)">{{ choice }}</button>
-      }
-    </div>
+    <label class="paint">Paint
+      <select [value]="aesthetics.current()" (change)="aesthetic(($any($event.target)).value)">
+        @for (choice of aesthetics.choices; track choice) {
+          <option [value]="choice">{{ choice }}</option>
+        }
+      </select>
+    </label>
   </header>
 
   @if (exportOpen()) {

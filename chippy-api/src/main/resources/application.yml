@@ -6,6 +6,23 @@ spring:
       max-file-size: 8MB
       max-request-size: 8MB
 # Turn the opening animation off without a rebuild: CHIPPY_SPLASH_ENABLED=false
+# Monetization stays off until you set flags and IDs. See MONETIZATION_SETUP.md.
 chippy:
   splash:
     enabled: true
+  coffee:
+    enabled: false
+    url: ""
+    delay-minutes: 5
+    title: "Hey! If you are enjoying this please consider buying me a coffee..."
+    body: "It will help pay server costs to keep this running and free for everyone!!!"
+    accept-label: "Alright!"
+    dismiss-label: "Maybe Later"
+  ads:
+    enabled: false
+    provider: adsense
+    client-id: ""
+    slot-id: ""
+  rate-limit:
+    validate-per-minute: 30
+    api-per-minute: 120

@@ -12,27 +12,34 @@ A web tracker for writing Game Boy and Vectrex chiptunes.  I'd like to keep it a
 - One screen with the order list, every channel, and the instrument.
 - Game Boy (two pulse channels, wave, noise) and Vectrex (three tone channels).
 - The keyboard plays a note as you write it. Undo, mute, and solo are on that screen.
-- Vaporwave, dark, and plain paint, switched from the top bar.
+- Vaporwave, dark, and plain paint, chosen from a Paint dropdown (defaults to vaporwave).
 - A short opening animation. Set `splashEnabled` to `false` in `frontend/public/config.json`, or `chippy.splash.enabled` in `chippy-api/src/main/resources/application.yml`.
 - Save a `.chippy.json` project and open one again. Uploads are parsed and rejected when they are not a project or a YM file.
 - Create a random song after a warning and typing YES.
 - Export WAV, YM6, Game Boy VGM, and a Vectrex AKY assembly file plus player config.
 - Open a YM beside the song, play a range, and keep it as an instrument.
+- Optional Buy Me a Coffee prompt and Google AdSense slot, both off until you configure them. See [MONETIZATION_SETUP.md](MONETIZATION_SETUP.md).
+- API rate limits on upload validation to reduce abuse.
 
 ## Later
 
-More chips (C64, NES), snip on those chips, and deeper tracker tools such as tables and grooves. Chains are not required to write a loop, so they are not on the first screen.
+- More chips (C64, NES, Atari ST), snip on those chips, and a dedicated YM Player.
+- YM Radio (rotation, submit/approve, thumbs, visualization).
+- Deeper tracker tools such as tables and grooves. Chains are not required to write a loop, so they are not on the first screen.
+- Real sign-in so donors can use an ad-free session.
 
 ## Run it locally
 
 You need Java 21 and Node 22.22 or 24.15 or newer. The scripts in `scripts/` use a portable JDK and Maven under `.tools` when those archives are present, and they download Node 24 into `.tools` when the installed Node is older than that.
 
-- `scripts/dev.cmd` or `scripts/dev.sh` starts the API on port 8080 and the Angular app on port 4200. Open `http://localhost:4200`. Logs: `logs/dev-api.log` and `logs/dev-ui.log`.
+- `scripts/dev.cmd` or `scripts/dev.sh` starts the API on port 8080 and the Angular app on port 4200, waits until the UI answers, then opens `http://localhost:4200` in your browser. Logs: `logs/dev-api.log` and `logs/dev-ui.log`.
 - `scripts/dev-ui.cmd` / `scripts/dev-ui.sh` starts only Angular.
 - `scripts/dev-api.cmd` / `scripts/dev-api.sh` starts only Spring Boot.
 - `scripts/build.cmd` / `scripts/build.sh` packages the WAR and writes `logs/build.log`.
 
 IntelliJ and VS Code both open this repository. Java lives in `chippy-api`. Angular lives in `frontend`.
+
+Frontend tests (`npm test`) and API tests (`mvn -pl chippy-api test`) enforce about 80% coverage on the libraries and API code under test.
 
 ## Hosting
 
@@ -55,7 +62,7 @@ flowchart LR
   end
   subgraph api [Spring Boot]
     Validate[Upload checks]
-    Security[Headers and auth stub]
+    Security[Headers auth stub rate limit]
   end
   Shell --> Tracker
   Shell --> Listen

@@ -30,4 +30,4 @@ The container listens on 8080 as a non-root user. OpenShift may assign any UID i
 
 ## Security
 
-Spring Security is on the classpath and permits every request. `ChippyAuthorization` is the seam for a later sign-in. Responses send a content security policy, frame denial, a referrer policy, and a permissions policy. HSTS is added only on HTTPS. Uploads are size-capped, parsed, and re-serialized. The server does not store songs.
+Spring Security is on the classpath and permits every request. `ChippyAuthorization` is the seam for a later sign-in. Responses send a content security policy (widened when coffee/ads are enabled), frame denial, a referrer policy, and a permissions policy. HSTS is added only on HTTPS. Uploads are size-capped, parsed, and re-serialized. Validate endpoints are rate-limited per IP in memory. Optional Buy Me a Coffee and AdSense flags are served from `/config.json` (see `MONETIZATION_SETUP.md`). The server does not store songs.

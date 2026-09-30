@@ -10,7 +10,7 @@ import {
   type ColumnId,
   type Song,
 } from '@chippy/domain';
-import { AestheticService, type AestheticId } from '../aesthetic.service';
+import { AestheticService } from '../aesthetic.service';
 import { PlaybackService } from '../playback.service';
 import { SessionService } from '../session.service';
 
@@ -237,8 +237,10 @@ export class TrackerComponent {
     URL.revokeObjectURL(url);
   }
 
-  aesthetic(id: AestheticId): void {
-    this.aesthetics.select(id);
+  aesthetic(id: string): void {
+    if (id === 'vaporwave' || id === 'dark' || id === 'plain') {
+      this.aesthetics.select(id);
+    }
   }
 
   sessionName(value: string): void {
