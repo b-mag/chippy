@@ -19,6 +19,7 @@ import {
   findInstrumentIdByNumberLabel,
   formatEffect,
   formatNote,
+  kindAllowedOnChannel,
   noteFromKey,
   patternDisplayName,
   presetsForChip,
@@ -197,6 +198,10 @@ export class TrackerComponent {
       sid: 'SID',
     };
     return labels[kind];
+  }
+
+  instrumentFitsCursor(kind: InstrumentKind): boolean {
+    return kindAllowedOnChannel(this.project().chip, this.state().cursor.channel, kind);
   }
 
   chipOptionLabel(id: string): string {
@@ -384,6 +389,7 @@ export class TrackerComponent {
     else next.add(index);
     if (kind === 'mute') this.muted.set(next);
     else this.solo.set(next);
+    this.playback.setMuteSolo(this.muted(), this.solo());
   }
 
   fieldValue(key: string): string | number | boolean {

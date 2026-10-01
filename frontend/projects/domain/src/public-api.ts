@@ -30,6 +30,8 @@ export {
   chipDefinition,
   chipIds,
   chipLabel,
+  instrumentForChannel,
+  kindAllowedOnChannel,
 } from './lib/chips';
 export {
   activeSongBody,
@@ -99,4 +101,4 @@ export {
   setVolume,
   undo,
 } from './lib/session';
-export { fillPatternRandom, randomProject, randomSong } from './lib/random-song';
+export { ensureChannelInstruments, fillPatternRandom, randomProject, randomSong } from './lib/random-song';

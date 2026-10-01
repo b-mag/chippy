@@ -316,4 +316,37 @@ export function auditionChannelIndex(chip: ChipId, kind: InstrumentKind): number
   return Math.max(0, definition.channels.findIndex((channel) => channel.id === id));
 }
 
+/** Whether this instrument kind can sound on the given channel index. */
+export function kindAllowedOnChannel(chip: ChipId, channelIndex: number, kind: InstrumentKind): boolean {
+  const definition = chipDefinition(chip);
+  const channel = definition.channels[channelIndex];
+  if (!channel) {
+    return false;
+  }
+  return definition.kindsForChannel(channel.id).includes(kind);
+}
+
+/**
+ * Pick an instrument that can play on `channelIndex`.
+ * Prefers the armed instrument when it matches; otherwise the first bank match.
+ */
+export function instrumentForChannel(
+  chip: ChipId,
+  instruments: Instrument[],
+  armedInstrumentId: string,
+  channelIndex: number,
+): Instrument | undefined {
+  const definition = chipDefinition(chip);
+  const channel = definition.channels[channelIndex];
+  if (!channel) {
+    return undefined;
+  }
+  const allowed = definition.kindsForChannel(channel.id);
+  const armed = instruments.find((item) => item.id === armedInstrumentId);
+  if (armed && allowed.includes(armed.kind)) {
+    return armed;
+  }
+  return instruments.find((item) => allowed.includes(item.kind));
+}
+
 export { baseInstrument };

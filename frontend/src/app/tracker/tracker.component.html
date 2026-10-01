@@ -161,10 +161,13 @@
             <button
               type="button"
               [attr.aria-pressed]="instrument.id === project().armedInstrumentId"
+              [class.instrument-mismatch]="!instrumentFitsCursor(instrument.kind)"
               (click)="session.arm(instrument.id)"
-              (dblclick)="beginInstrumentRename(instrument.id, instrument.name)">
+              (dblclick)="beginInstrumentRename(instrument.id, instrument.name)"
+              [title]="instrumentFitsCursor(instrument.kind) ? kindLabel(instrument.kind) + ' instrument' : kindLabel(instrument.kind) + ' — not for the selected channel'">
               <span class="instrument-num">{{ instrumentNumberLabel(instrument.id) }}</span>
-              {{ instrument.name }}
+              <span class="instrument-name">{{ instrument.name }}</span>
+              <span class="instrument-kind">({{ kindLabel(instrument.kind) }})</span>
             </button>
           }
         </li>

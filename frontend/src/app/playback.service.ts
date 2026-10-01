@@ -6,7 +6,14 @@ import {
   PATTERN_ROWS,
   type Song,
 } from '@chippy/domain';
-import { renderSong, type AyFrame, type GbFrame, type RenderedSong, type SidFrame } from '@chippy/engines';
+import {
+  renderSong,
+  WAVEFORMS,
+  type AyFrame,
+  type GbFrame,
+  type RenderedSong,
+  type SidFrame,
+} from '@chippy/engines';
 
 export type LoopMode = 'off' | 'pattern' | 'song';
 
@@ -29,8 +36,12 @@ export class PlaybackService {
   private auditionTimer = 0;
   private context: AudioContext | null = null;
   private gains: GainNode[] = [];
+  private oscillators: OscillatorNode[] = [];
   private noiseNodes: AudioBufferSourceNode[] = [];
   private noiseGains: GainNode[] = [];
+  private waveGain: GainNode | null = null;
+  private waveSource: AudioBufferSourceNode | null = null;
+  private waveSampleKey = '';
   private rendered: RenderedSong | null = null;
   private absoluteRow = 0;
   private playOrderIndex = 0;
@@ -85,12 +96,7 @@ export class PlaybackService {
       if (index >= framesToPlay) {
         window.clearInterval(this.auditionTimer);
         this.auditionTimer = 0;
-        this.gains.forEach((gain) => {
-          gain.gain.value = 0;
-        });
-        this.noiseGains.forEach((gain) => {
-          gain.gain.value = 0;
-        });
+        this.silenceAll();
         return;
       }
       this.applyFrame(rendered.chip, rendered.frames[index], emptyMute, emptySolo);
@@ -110,8 +116,13 @@ export class PlaybackService {
     this.orderIndex.set(null);
     this.tick.set(null);
     this.rendered = null;
-    this.gains.forEach((gain) => { gain.gain.value = 0; });
-    this.noiseGains.forEach((gain) => { gain.gain.value = 0; });
+    this.silenceAll();
+  }
+
+  /** Update mute/solo while a song is already playing. */
+  setMuteSolo(muted: ReadonlySet<number>, solo: ReadonlySet<number>): void {
+    this.mutedChannels = new Set(muted);
+    this.soloChannels = new Set(solo);
   }
 
   /**
@@ -173,6 +184,14 @@ export class PlaybackService {
     this.timer = window.setInterval(tick, rowMs);
   }
 
+  private silenceAll(): void {
+    this.gains.forEach((gain) => { gain.gain.value = 0; });
+    this.noiseGains.forEach((gain) => { gain.gain.value = 0; });
+    if (this.waveGain) {
+      this.waveGain.gain.value = 0;
+    }
+  }
+
   private ensure(): AudioContext {
     if (!this.context) {
       this.context = new AudioContext();
@@ -196,16 +215,22 @@ export class PlaybackService {
   }
 
   private prepareVoices(context: AudioContext, count: number): void {
-    if (this.gains.length === count && this.noiseGains.length === count) {
+    if (this.gains.length === count && this.noiseGains.length === count && this.oscillators.length === count) {
+      this.ensureWaveVoice(context);
       return;
     }
     this.gains.forEach((gain) => gain.disconnect());
+    this.oscillators.forEach((node) => {
+      try { node.stop(); } catch { /* already stopped */ }
+      node.disconnect();
+    });
     this.noiseNodes.forEach((node) => {
       try { node.stop(); } catch { /* already stopped */ }
       node.disconnect();
     });
     this.noiseGains.forEach((gain) => gain.disconnect());
     this.gains = [];
+    this.oscillators = [];
     this.noiseNodes = [];
     this.noiseGains = [];
     const buffer = this.noiseBuffer(context);
@@ -213,12 +238,12 @@ export class PlaybackService {
       const oscillator = context.createOscillator();
       const gain = context.createGain();
       oscillator.type = 'square';
-      oscillator.frequency.value = 0;
+      oscillator.frequency.value = 440;
       gain.gain.value = 0;
       oscillator.connect(gain).connect(context.destination);
       oscillator.start();
       this.gains.push(gain);
-      (gain as GainNode & { oscillator?: OscillatorNode }).oscillator = oscillator;
+      this.oscillators.push(oscillator);
 
       const noiseGain = context.createGain();
       noiseGain.gain.value = 0;
@@ -230,6 +255,48 @@ export class PlaybackService {
       this.noiseNodes.push(noise);
       this.noiseGains.push(noiseGain);
     }
+    this.ensureWaveVoice(context);
+  }
+
+  private ensureWaveVoice(context: AudioContext): void {
+    if (this.waveGain) {
+      return;
+    }
+    this.waveGain = context.createGain();
+    this.waveGain.gain.value = 0;
+    this.waveGain.connect(context.destination);
+  }
+
+  private setWaveVoice(samples: number[], hz: number, level: number): void {
+    const context = this.ensure();
+    this.ensureWaveVoice(context);
+    const gain = this.waveGain;
+    if (!gain) {
+      return;
+    }
+    const key = samples.join(',');
+    if (!this.waveSource || this.waveSampleKey !== key) {
+      if (this.waveSource) {
+        try { this.waveSource.stop(); } catch { /* already stopped */ }
+        this.waveSource.disconnect();
+        this.waveSource = null;
+      }
+      const buffer = context.createBuffer(1, 32, context.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let index = 0; index < 32; index += 1) {
+        data[index] = (((samples[index] ?? 0) / 15) * 2 - 1) * 0.35;
+      }
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      source.connect(gain);
+      source.start();
+      this.waveSource = source;
+      this.waveSampleKey = key;
+    }
+    // 32-sample loop at rate 1 ⇒ sampleRate/32 Hz; scale to the target pitch.
+    this.waveSource.playbackRate.value = Math.max(0.01, (hz * 32) / context.sampleRate);
+    gain.gain.value = level;
   }
 
   private hardwareEnvelopeLevel(shape: number, phase: number): number {
@@ -266,6 +333,9 @@ export class PlaybackService {
     }
     const audible = (channel: number) => (solo.size > 0 ? solo.has(channel) : !muted.has(channel));
     if (chip === 'vectrex') {
+      if (this.waveGain) {
+        this.waveGain.gain.value = 0;
+      }
       const ay = frame as AyFrame;
       const mixer = ay[7] ?? 0x3f;
       const noisePeriod = (ay[6] & 0x1f) || 1;
@@ -274,17 +344,12 @@ export class PlaybackService {
       if (envPeriod > 0) {
         this.envPeriod = envPeriod;
       }
-      if ((ay[13] & 0x0f) !== 0 || ay[13] === 0) {
-        // Shape register is only meaningful when written; keep last shape when zeroed frames appear.
-        if (ay[8] & 0x10 || ay[9] & 0x10 || ay[10] & 0x10) {
-          this.envShape = ay[13] & 0x0f;
-        }
+      if (ay[8] & 0x10 || ay[9] & 0x10 || ay[10] & 0x10) {
+        this.envShape = ay[13] & 0x0f;
       }
       this.envClock += 1;
       const envStep = Math.floor(this.envClock / Math.max(1, Math.floor(this.envPeriod / 256) || 1));
       for (let channel = 0; channel < 3; channel += 1) {
-        const node = this.gains[channel] as GainNode & { oscillator?: OscillatorNode };
-        const noiseGain = this.noiseGains[channel];
         const period = ay[channel * 2] | ((ay[channel * 2 + 1] & 0x0f) << 8);
         const toneOn = (mixer & (1 << channel)) === 0 && period > 0 && audible(channel);
         const noiseOn = (mixer & (1 << (channel + 3))) === 0 && audible(channel);
@@ -293,12 +358,13 @@ export class PlaybackService {
         const level = useEnv
           ? this.hardwareEnvelopeLevel(this.envShape, envStep)
           : (volReg & 0x0f) / 15;
-        node.gain.value = toneOn ? level * 0.12 : 0;
-        if (toneOn && node.oscillator) {
-          node.oscillator.frequency.value = 1_500_000 / (16 * period);
+        this.gains[channel].gain.value = toneOn ? level * 0.12 : 0;
+        if (toneOn && this.oscillators[channel]) {
+          this.oscillators[channel].type = 'square';
+          this.oscillators[channel].frequency.value = 1_500_000 / (16 * period);
         }
-        if (noiseGain) {
-          noiseGain.gain.value = noiseOn ? level * 0.08 : 0;
+        if (this.noiseGains[channel]) {
+          this.noiseGains[channel].gain.value = noiseOn ? level * 0.08 : 0;
           const noiseNode = this.noiseNodes[channel];
           if (noiseNode) {
             noiseNode.playbackRate.value = noiseRate;
@@ -307,20 +373,26 @@ export class PlaybackService {
       }
       return;
     }
-    this.noiseGains.forEach((gain) => { gain.gain.value = 0; });
+    this.noiseGains.forEach((gain, index) => {
+      if (chip !== 'gameboy' || index !== 3) {
+        gain.gain.value = 0;
+      }
+    });
     if (chip === 'c64') {
+      if (this.waveGain) {
+        this.waveGain.gain.value = 0;
+      }
       const sid = frame as SidFrame;
       for (let channel = 0; channel < 3; channel += 1) {
-        const node = this.gains[channel] as GainNode & { oscillator?: OscillatorNode };
         const voice = sid.voices[channel];
         const on = voice.amp > 0 && voice.hz > 0 && voice.wave !== 'none' && audible(channel);
-        node.gain.value = on ? voice.amp * 0.12 : 0;
-        if (on && node.oscillator) {
-          node.oscillator.type = voice.wave === 'saw' ? 'sawtooth'
+        this.gains[channel].gain.value = on ? voice.amp * 0.12 : 0;
+        if (on && this.oscillators[channel]) {
+          this.oscillators[channel].type = voice.wave === 'saw' ? 'sawtooth'
             : voice.wave === 'triangle' ? 'triangle'
               : voice.wave === 'noise' ? 'square'
                 : 'square';
-          node.oscillator.frequency.value = voice.hz;
+          this.oscillators[channel].frequency.value = voice.hz;
         }
       }
       return;
@@ -331,14 +403,44 @@ export class PlaybackService {
       gb.nr23 | ((gb.nr24 & 7) << 8),
     ];
     pulses.forEach((frequency, channel) => {
-      const node = this.gains[channel] as GainNode & { oscillator?: OscillatorNode };
-      const on = frequency > 0 && audible(channel);
+      const triggered = channel === 0 ? (gb.nr14 & 0x80) !== 0 : (gb.nr24 & 0x80) !== 0;
+      const on = frequency > 0 && triggered && audible(channel);
       const envelope = channel === 0 ? gb.nr12 : gb.nr22;
-      node.gain.value = on ? (((envelope >> 4) & 0x0f) / 15) * 0.1 : 0;
-      if (on && node.oscillator) {
-        node.oscillator.frequency.value = 131072 / (2048 - frequency);
+      this.gains[channel].gain.value = on ? (((envelope >> 4) & 0x0f) / 15) * 0.12 : 0;
+      if (on && this.oscillators[channel]) {
+        this.oscillators[channel].type = 'square';
+        this.oscillators[channel].frequency.value = 131072 / Math.max(1, 2048 - frequency);
       }
     });
+    // Pulse oscillators are only channels 0–1; keep channel 2's square silent (wave uses wavetable).
+    if (this.gains[2]) {
+      this.gains[2].gain.value = 0;
+    }
+    const waveFreqReg = gb.nr33 | ((gb.nr34 & 7) << 8);
+    const waveVolShift = (gb.nr32 >> 5) & 0x03;
+    const waveLevel = waveVolShift === 0 ? 0 : waveVolShift === 1 ? 1 : waveVolShift === 2 ? 0.5 : 0.25;
+    const waveOn = (gb.nr30 & 0x80) !== 0 && waveFreqReg > 0 && waveLevel > 0 && audible(2);
+    if (waveOn) {
+      // Match written note pitch (pulse clock) so WAV audition feels in tune with PU1/PU2.
+      const hz = 131072 / Math.max(1, 2048 - waveFreqReg);
+      const samples = gb.wave?.length ? gb.wave : WAVEFORMS[0];
+      this.setWaveVoice(samples, hz, waveLevel * 0.2);
+    } else if (this.waveGain) {
+      this.waveGain.gain.value = 0;
+    }
+    if (this.gains[3]) {
+      this.gains[3].gain.value = 0;
+    }
+    if (this.noiseGains[3]) {
+      const on = (gb.nr44 & 0x80) !== 0 && audible(3);
+      const level = ((gb.nr42 >> 4) & 0x0f) / 15;
+      this.noiseGains[3].gain.value = on ? level * 0.12 : 0;
+      const noiseNode = this.noiseNodes[3];
+      if (noiseNode) {
+        const shift = (gb.nr43 >> 4) & 0x0f;
+        noiseNode.playbackRate.value = Math.max(0.25, (15 - shift) / 4);
+      }
+    }
   }
 
   playFrames(frames: AyFrame[], frameRate: number, start: number, end: number): void {

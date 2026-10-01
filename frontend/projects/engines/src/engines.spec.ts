@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addInstrument,
   addSnipInstrument,
   enterCut,
   enterNote,
@@ -63,6 +64,22 @@ describe('renderSong', () => {
     expect(rendered.frames[0].nr14 & 0x80).toBe(0x80);
     expect(rendered.frames[0].nr30).toBe(0x80);
     expect(rendered.frames[0].nr44).toBe(0x80);
+  });
+
+  it('renders game boy wave channel frames for a wave instrument note', () => {
+    let state = newSession('gameboy');
+    state = addInstrument(state, 'wave');
+    state = { ...state, cursor: { ...state.cursor, channel: 2, row: 0 } };
+    state = enterNote(state, 60);
+    const rendered = renderSong(songForRender(state.project));
+    expect(rendered.chip).toBe('gameboy');
+    if (rendered.chip === 'gameboy') {
+      expect(rendered.frames[0].nr30 & 0x80).toBe(0x80);
+      expect(rendered.frames[0].nr32 & 0x60).toBe(0x20);
+      const freq = rendered.frames[0].nr33 | ((rendered.frames[0].nr34 & 7) << 8);
+      expect(freq).toBeGreaterThan(0);
+      expect(rendered.frames[0].wave.length).toBe(32);
+    }
   });
 
   it('applies vectrex soft envelope, volume macro, and pitch macro', () => {

@@ -1,6 +1,6 @@
-import { baseInstrument, chipDefinition } from './chips';
+import { baseInstrument, chipDefinition, instrumentForChannel, kindAllowedOnChannel } from './chips';
 import { instrumentFromPreset, type InstrumentPreset } from './presets';
-import { fillPatternRandom, randomProject } from './random-song';
+import { ensureChannelInstruments, fillPatternRandom, randomProject } from './random-song';
 import {
   activeSongBody,
   blankPattern,
@@ -241,23 +241,57 @@ function writeCell(state: SessionState, cell: Cell, advance: boolean): SessionSt
   return { ...next, cursor: { ...state.cursor, row } };
 }
 
-/** Write a note with the armed instrument, play it, and move down one row. */
+/**
+ * Resolve an instrument that can play on the cursor channel.
+ * Auto-creates a matching instrument when the bank has none for that channel kind.
+ */
+function resolveInstrumentForCursor(state: SessionState): { state: SessionState; instrument: Instrument } {
+  const channel = state.cursor.channel;
+  const match = instrumentForChannel(
+    state.project.chip,
+    state.project.instruments,
+    state.project.armedInstrumentId,
+    channel,
+  );
+  if (match) {
+    return { state, instrument: match };
+  }
+  const ensured = ensureChannelInstruments(state.project);
+  const created = instrumentForChannel(
+    ensured.chip,
+    ensured.instruments,
+    ensured.armedInstrumentId,
+    channel,
+  ) ?? ensured.instruments[0];
+  return {
+    state: ensured === state.project ? state : commit(state, ensured),
+    instrument: created,
+  };
+}
+
+/** Write a note with a channel-compatible instrument, and move down one row. */
 export function enterNote(state: SessionState, midi: number): SessionState {
-  const instrument = armedInstrument(state.project);
+  const resolved = resolveInstrumentForCursor(state);
+  state = resolved.state;
   const body = activeSongBody(state.project);
   const pattern = currentPattern(body, state.cursor);
   const existing = pattern.rows[state.cursor.row][state.cursor.channel];
-  return writeCell(
+  const next = writeCell(
     state,
     {
       note: midi,
       cut: false,
-      instrumentId: instrument.id,
+      instrumentId: resolved.instrument.id,
       volume: null,
       effect: existing?.effect ?? null,
     },
     true,
   );
+  if (resolved.instrument.id !== state.project.armedInstrumentId
+    && kindAllowedOnChannel(state.project.chip, state.cursor.channel, resolved.instrument.kind)) {
+    return { ...next, project: { ...next.project, armedInstrumentId: resolved.instrument.id } };
+  }
+  return next;
 }
 
 export function enterCut(state: SessionState): SessionState {
@@ -484,11 +518,19 @@ export function clearPattern(state: SessionState): SessionState {
 }
 
 export function addRandomPattern(state: SessionState, seed: number): SessionState {
-  const channelCount = chipDefinition(state.project.chip).channels.length;
-  const next = mutateActiveSong(state, (body) => {
+  const ensured = ensureChannelInstruments(state.project);
+  const withInstruments = ensured === state.project ? state : commit(state, ensured);
+  const channelCount = chipDefinition(withInstruments.project.chip).channels.length;
+  const next = mutateActiveSong(withInstruments, (body) => {
     const id = nextPatternId(body);
     const pattern = blankPattern(id, nextBlankPatternName(body), channelCount);
-    fillPatternRandom(pattern, state.project.chip, state.project.armedInstrumentId, seed);
+    fillPatternRandom(
+      pattern,
+      withInstruments.project.chip,
+      withInstruments.project.instruments,
+      withInstruments.project.armedInstrumentId,
+      seed,
+    );
     return {
       ...body,
       patterns: [...body.patterns, pattern],

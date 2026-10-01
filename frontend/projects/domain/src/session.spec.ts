@@ -163,14 +163,28 @@ describe('session editing', () => {
   it('adds a random pattern without wiping earlier order entries', () => {
     let state = enterNote(newSession('gameboy'), 60);
     const kept = activeSongBody(state.project).patterns[0].rows[0][0].note;
-    const armed = state.project.armedInstrumentId;
     state = addRandomPattern(state, 42);
     expect(activeSongBody(state.project).order).toHaveLength(2);
     expect(activeSongBody(state.project).patterns[0].rows[0][0].note).toBe(kept);
     expect(activeSongBody(state.project).patterns[1].name).toBe('Pattern 2');
     const notes = activeSongBody(state.project).patterns[1].rows.flat().filter((cell) => cell.note !== null);
     expect(notes.length).toBeGreaterThan(0);
-    expect(notes.every((cell) => cell.instrumentId === armed)).toBe(true);
+    expect(state.project.instruments.some((item) => item.kind === 'wave')).toBe(true);
+    expect(state.project.instruments.some((item) => item.kind === 'noise')).toBe(true);
+    const kinds = new Map(state.project.instruments.map((item) => [item.id, item.kind]));
+    const pattern = activeSongBody(state.project).patterns[1];
+    for (let channel = 0; channel < 4; channel += 1) {
+      const allowed = chipDefinition('gameboy').kindsForChannel(
+        chipDefinition('gameboy').channels[channel].id,
+      );
+      for (const row of pattern.rows) {
+        const cell = row[channel];
+        if (!cell.instrumentId) {
+          continue;
+        }
+        expect(allowed).toContain(kinds.get(cell.instrumentId));
+      }
+    }
     expect(nextBlankPatternName(activeSongBody(state.project))).toBe('Pattern 3');
     expect(nextDuplicatePatternName(activeSongBody(state.project), 'Pattern 2')).toBe('Pattern 2 (1)');
     expect(duplicateBaseName('Verse (3)')).toBe('Verse');

@@ -2,7 +2,7 @@
 
 .workspace {
   display: grid;
-  grid-template-columns: 14rem minmax(0, 1fr) 16rem;
+  grid-template-columns: 14rem minmax(0, 1fr) 18.4rem;
   grid-template-rows: auto minmax(0, 1fr) auto auto;
   gap: 12px;
   height: 100%;
@@ -328,6 +328,9 @@
 .instrument-list button {
   width: 100%;
   text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .instrument-list button[aria-pressed='true'] {
@@ -336,10 +339,28 @@
   font-weight: 600;
 }
 
+.instrument-list button.instrument-mismatch {
+  opacity: 0.55;
+}
+
+.instrument-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.instrument-kind {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
 .instrument-num {
   display: inline-block;
   min-width: 1.25rem;
-  margin-right: 0.35rem;
+  flex: 0 0 auto;
   font-family: ui-monospace, monospace;
   opacity: 0.75;
 }
