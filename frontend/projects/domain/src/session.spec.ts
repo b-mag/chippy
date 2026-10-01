@@ -51,6 +51,9 @@ import {
   updateInstrument,
   chipDefinition,
   chipIds,
+  chipLabel,
+  instrumentForChannel,
+  kindAllowedOnChannel,
 } from '@chippy/domain';
 import { toggleMute } from './lib/session';
 
@@ -192,9 +195,26 @@ describe('session editing', () => {
     expect(renamePattern(state, activeSongBody(state.project).patterns[0].id, '   ')).toBe(state);
     expect(chipIds()).toContain('gameboy');
     expect(chipIds()).toContain('c64');
+    expect(chipIds()).toContain('atarist');
+    expect(chipIds()).toContain('nes');
     expect(chipDefinition('vectrex').channels).toHaveLength(3);
+    expect(chipDefinition('atarist').clockHz).toBe(2_000_000);
+    expect(chipDefinition('atarist').createInstrument('pulse').kind).toBe('tone');
+    expect(chipDefinition('atarist').createInstrument('tone').kind).toBe('tone');
+    expect(chipDefinition('nes').channels).toHaveLength(4);
+    expect(chipDefinition('nes').kindsForChannel('triangle')).toEqual(['triangle']);
+    expect(chipDefinition('nes').kindsForChannel('noise')).toEqual(['noise']);
+    expect(chipDefinition('nes').createInstrument('triangle').kind).toBe('triangle');
+    expect(chipDefinition('nes').createInstrument('sid').kind).toBe('pulse');
+    expect(chipLabel('atarist')).toBe('Atari ST');
+    expect(chipLabel('nes')).toBe('NES');
+    expect(kindAllowedOnChannel('nes', 99, 'pulse')).toBe(false);
+    expect(instrumentForChannel('nes', [], 'missing', 99)).toBeUndefined();
+    expect(auditionChannelId('nes', 'triangle')).toBe('triangle');
     expect(chipDefinition('c64').createInstrument('pulse').kind).toBe('sid');
     expect(presetsForChip('c64').length).toBeGreaterThan(0);
+    expect(presetsForChip('atarist').length).toBeGreaterThan(0);
+    expect(presetsForChip('nes').length).toBeGreaterThan(0);
   });
 
   it('keeps Pattern N and duplicate suffixes stable across add and copy', () => {

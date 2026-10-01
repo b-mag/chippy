@@ -15,9 +15,9 @@ class ValidatorsTest {
     void projectRejectsEmptyUnknownChipAndMissingCollections() {
         assertThrows(UploadRejectedException.class, () -> ProjectValidator.reparse(new byte[0]));
         assertThrows(UploadRejectedException.class, () -> ProjectValidator.reparse(oversized()));
-        String badChip = "{\"version\":1,\"name\":\"A\",\"chip\":\"nes\",\"tempo\":120,\"order\":[\"pat-1\"],\"patterns\":[{\"id\":\"pat-1\"}],\"instruments\":[{\"id\":\"ins-1\"}],\"armedInstrumentId\":\"ins-1\"}";
+        String badChip = "{\"version\":1,\"name\":\"A\",\"chip\":\"zx\",\"tempo\":120,\"order\":[\"pat-1\"],\"patterns\":[{\"id\":\"pat-1\"}],\"instruments\":[{\"id\":\"ins-1\"}],\"armedInstrumentId\":\"ins-1\"}";
         assertThrows(UploadRejectedException.class, () -> ProjectValidator.reparse(badChip.getBytes(StandardCharsets.UTF_8)));
-        String badVersion = badChip.replace("\"version\":1", "\"version\":2").replace("nes", "gameboy");
+        String badVersion = badChip.replace("\"version\":1", "\"version\":2").replace("zx", "gameboy");
         assertThrows(UploadRejectedException.class, () -> ProjectValidator.reparse(badVersion.getBytes(StandardCharsets.UTF_8)));
         String noPatterns = "{\"version\":1,\"name\":\"A\",\"chip\":\"gameboy\",\"tempo\":120,\"order\":[],\"patterns\":[],\"instruments\":[{\"id\":\"ins-1\"}],\"armedInstrumentId\":\"ins-1\"}";
         assertThrows(UploadRejectedException.class, () -> ProjectValidator.reparse(noPatterns.getBytes(StandardCharsets.UTF_8)));

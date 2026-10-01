@@ -5,7 +5,7 @@ export { a4Hz, a4Period, encodeWav, renderPcm } from './lib/pcm';
 export { AkyUnsupportedError, encodeAky } from './lib/aky';
 
 import { renderSong } from '@chippy/engines';
-import type { Song } from '@chippy/domain';
+import { chipDefinition, type Song } from '@chippy/domain';
 import { encodeAky } from './lib/aky';
 import { renderPcm, encodeWav } from './lib/pcm';
 import { encodeVgm } from './lib/vgm';
@@ -32,12 +32,13 @@ export function exportWav(song: Song): ExportBundle {
 
 export function exportYm(song: Song): ExportBundle {
   const rendered = renderSong(song);
-  if (rendered.chip !== 'vectrex') {
-    throw new Error('YM6 export is for the Vectrex.');
+  if (rendered.chip !== 'vectrex' && rendered.chip !== 'atarist') {
+    throw new Error('YM6 export is for Vectrex and Atari ST.');
   }
+  const definition = chipDefinition(rendered.chip);
   return {
     filename: `${safe(song.name)}.ym`,
-    bytes: encodeYm6(rendered.frames, song.name),
+    bytes: encodeYm6(rendered.frames, song.name, definition.clockHz, definition.frameRate),
     mime: 'application/octet-stream',
   };
 }

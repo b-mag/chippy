@@ -27,10 +27,15 @@ describe('project file', () => {
     expect(() => parseProject('[]')).toThrow(/object/);
     expect(() => parseProject(JSON.stringify({ ...project, virus: true }))).toThrow(/Unknown/);
     expect(() => parseProject(JSON.stringify({ ...project, version: 99 }))).toThrow(/version/);
-    expect(() => parseProject(JSON.stringify({ ...project, chip: 'nes' }))).toThrow(/chip/);
+    expect(() => parseProject(JSON.stringify({ ...project, chip: 'zx' }))).toThrow(/chip/);
     const c64 = newProject('c64');
     expect(parseProject(serializeProject(c64)).chip).toBe('c64');
     expect(parseProject(serializeProject(c64)).instruments[0].kind).toBe('sid');
+    const atari = newProject('atarist');
+    expect(parseProject(serializeProject(atari)).chip).toBe('atarist');
+    const nes = newProject('nes');
+    expect(parseProject(serializeProject(nes)).chip).toBe('nes');
+    expect(parseProject(serializeProject(nes)).instruments[0].kind).toBe('pulse');
     const withFx = serializeProject(c64);
     const parsedFx = JSON.parse(withFx);
     parsedFx.songs[0].patterns[0].rows[0][0].effect = { cmd: 'D', value: 4 };
@@ -124,8 +129,51 @@ describe('export helpers', () => {
     expect(wav.filename.endsWith('.wav')).toBe(true);
     expect(wav.bytes.length).toBeGreaterThan(44);
     expect(renderSong(song).chip).toBe('c64');
-    expect(() => exportYm(song)).toThrow(/Vectrex/);
+    expect(() => exportYm(song)).toThrow(/Vectrex|Atari ST/);
     expect(() => exportVgm(song)).toThrow(/Game Boy/);
+  });
+
+  it('exports ym for atari st and wav for nes', () => {
+    let stState = newSession('atarist');
+    stState = updateInstrument(stState, stState.project.armedInstrumentId, {
+      mixNoise: true,
+      noisePeriod: 8,
+      hardwareEnvelope: true,
+      hardwareEnvelopePeriod: 0x1000,
+      hardwareEnvelopeShape: 0x0e,
+    });
+    stState = enterNote(stState, 69);
+    const stSong = songForRender(stState.project);
+    const ym = exportYm(stSong);
+    expect(ym.bytes[0]).toBe('Y'.charCodeAt(0));
+    expect(renderSong(stSong).chip).toBe('atarist');
+    expect(() => exportAky(stSong)).toThrow(/Vectrex/);
+    // Force triangle + short-noise through PCM for duty/noise branches.
+    const renderedNes = renderSong(songForRender(enterNote(newSession('nes'), 60).project));
+    expect(renderedNes.chip).toBe('nes');
+    if (renderedNes.chip === 'nes') {
+      const withAll = {
+        ...renderedNes,
+        frames: renderedNes.frames.map((frame) => ({
+          channels: [
+            { ...frame.channels[0], wave: 'pulse' as const, duty: 1 as const, hz: 440, amp: 0.5 },
+            { ...frame.channels[1], wave: 'none' as const, hz: 0, amp: 0 },
+            { ...frame.channels[2], wave: 'triangle' as const, hz: 220, amp: 0.4 },
+            { ...frame.channels[3], wave: 'noise' as const, hz: 100, amp: 0.3, noiseShort: true },
+          ] as typeof frame.channels,
+        })),
+      };
+      expect(renderPcm(withAll).length).toBeGreaterThan(0);
+    }
+    const nesSong = songForRender(enterNote(newSession('nes'), 60).project);
+    const wav = exportWav(nesSong);
+    expect(wav.filename.endsWith('.wav')).toBe(true);
+    expect(wav.bytes.length).toBeGreaterThan(44);
+    expect(renderSong(nesSong).chip).toBe('nes');
+    expect(() => exportYm(nesSong)).toThrow(/Vectrex|Atari ST/);
+    expect(() => exportVgm(nesSong)).toThrow(/Game Boy/);
+    expect(renderPcm(renderSong(nesSong)).length).toBeGreaterThan(0);
+    expect(renderPcm(renderSong(stSong)).length).toBeGreaterThan(0);
   });
 
   it('covers pcm edge paths and ym parse errors', () => {

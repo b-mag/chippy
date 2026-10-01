@@ -1,4 +1,14 @@
-import { ayPeriod, midiToHz, type AyFrame, type GbFrame, type RenderedSong, type SidFrame } from '@chippy/engines';
+import { chipDefinition } from '@chippy/domain';
+import {
+  ayPeriod,
+  midiToHz,
+  nesDutyFraction,
+  type AyFrame,
+  type GbFrame,
+  type NesFrame,
+  type RenderedSong,
+  type SidFrame,
+} from '@chippy/engines';
 
 const SAMPLE_RATE = 44100;
 
@@ -61,7 +71,8 @@ export function renderPcm(rendered: RenderedSong): Int16Array {
     const frame = rendered.frames[index];
     for (let sample = 0; sample < samplesPerFrame; sample += 1) {
       let mixed = 0;
-      if (rendered.chip === 'vectrex') {
+      if (rendered.chip === 'vectrex' || rendered.chip === 'atarist') {
+        const ayClock = chipDefinition(rendered.chip).clockHz;
         const ay = frame as AyFrame;
         const mixer = ay[7] ?? 0x3f;
         const noisePeriod = (ay[6] & 0x1f) || 1;
@@ -78,7 +89,7 @@ export function renderPcm(rendered: RenderedSong): Int16Array {
         const noiseSample = noise & 1 ? 0.22 : -0.22;
         for (let channel = 0; channel < 3; channel += 1) {
           const period = (ay[channel * 2] | ((ay[channel * 2 + 1] & 0x0f) << 8)) || 1;
-          const hz = 1_500_000 / (16 * period);
+          const hz = ayClock / (16 * period);
           const toneOn = (mixer & (1 << channel)) === 0;
           const noiseOn = (mixer & (1 << (channel + 3))) === 0;
           const volReg = ay[8 + channel] ?? 0;
@@ -123,6 +134,26 @@ export function renderPcm(rendered: RenderedSong): Int16Array {
         if (sid.filterMode === 1) filtered = filterBp;
         if (sid.filterMode === 2) filtered = hp;
         mixed = dry + filtered * 0.9;
+      } else if (rendered.chip === 'nes') {
+        const nes = frame as NesFrame;
+        for (let channel = 0; channel < 4; channel += 1) {
+          const voice = nes.channels[channel];
+          if (voice.amp <= 0 || voice.hz <= 0 || voice.wave === 'none') {
+            continue;
+          }
+          if (voice.wave === 'noise') {
+            const taps = voice.noiseShort ? 6 : 1;
+            noise = (noise >> 1) | (((noise ^ (noise >> taps)) & 1) << 14);
+            mixed += (noise & 1 ? 0.18 : -0.18) * voice.amp;
+            continue;
+          }
+          if (voice.wave === 'triangle') {
+            mixed += triangle(phases[channel]) * voice.amp;
+          } else {
+            mixed += square(phases[channel], nesDutyFraction(voice.duty)) * voice.amp * 0.7;
+          }
+          phases[channel] = (phases[channel] + voice.hz / SAMPLE_RATE) % 1;
+        }
       } else {
         const gb = frame as GbFrame;
         const pulses: Array<[number, number, number]> = [

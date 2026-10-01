@@ -7,7 +7,7 @@ export const PROJECT_VERSION = 2;
 /** Legacy flat-document version still accepted on open and migrated to v2. */
 export const LEGACY_PROJECT_VERSION = 1;
 
-export type ChipId = 'gameboy' | 'vectrex' | 'c64';
+export type ChipId = 'gameboy' | 'vectrex' | 'c64' | 'atarist' | 'nes';
 
 export type ColumnId = 'note' | 'instrument' | 'volume' | 'effect';
 
@@ -28,7 +28,7 @@ export interface CellEffect {
   value: number;
 }
 
-export type InstrumentKind = 'pulse' | 'wave' | 'noise' | 'tone' | 'snip' | 'sid';
+export type InstrumentKind = 'pulse' | 'wave' | 'noise' | 'tone' | 'snip' | 'sid' | 'triangle';
 
 /** One step on one channel. Empty means the previous note keeps sounding. */
 export interface Cell {

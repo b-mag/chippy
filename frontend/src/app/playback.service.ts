@@ -11,6 +11,7 @@ import {
   WAVEFORMS,
   type AyFrame,
   type GbFrame,
+  type NesFrame,
   type RenderedSong,
   type SidFrame,
 } from '@chippy/engines';
@@ -323,8 +324,8 @@ export class PlaybackService {
   }
 
   private applyFrame(
-    chip: 'gameboy' | 'vectrex' | 'c64',
-    frame: AyFrame | GbFrame | SidFrame | undefined,
+    chip: 'gameboy' | 'vectrex' | 'atarist' | 'c64' | 'nes',
+    frame: AyFrame | GbFrame | SidFrame | NesFrame | undefined,
     muted: Set<number>,
     solo: Set<number>,
   ): void {
@@ -332,10 +333,11 @@ export class PlaybackService {
       return;
     }
     const audible = (channel: number) => (solo.size > 0 ? solo.has(channel) : !muted.has(channel));
-    if (chip === 'vectrex') {
+    if (chip === 'vectrex' || chip === 'atarist') {
       if (this.waveGain) {
         this.waveGain.gain.value = 0;
       }
+      const ayClock = chipDefinition(chip).clockHz;
       const ay = frame as AyFrame;
       const mixer = ay[7] ?? 0x3f;
       const noisePeriod = (ay[6] & 0x1f) || 1;
@@ -361,7 +363,7 @@ export class PlaybackService {
         this.gains[channel].gain.value = toneOn ? level * 0.12 : 0;
         if (toneOn && this.oscillators[channel]) {
           this.oscillators[channel].type = 'square';
-          this.oscillators[channel].frequency.value = 1_500_000 / (16 * period);
+          this.oscillators[channel].frequency.value = ayClock / (16 * period);
         }
         if (this.noiseGains[channel]) {
           this.noiseGains[channel].gain.value = noiseOn ? level * 0.08 : 0;
@@ -374,7 +376,7 @@ export class PlaybackService {
       return;
     }
     this.noiseGains.forEach((gain, index) => {
-      if (chip !== 'gameboy' || index !== 3) {
+      if ((chip !== 'gameboy' && chip !== 'nes') || index !== 3) {
         gain.gain.value = 0;
       }
     });
@@ -392,6 +394,38 @@ export class PlaybackService {
             : voice.wave === 'triangle' ? 'triangle'
               : voice.wave === 'noise' ? 'square'
                 : 'square';
+          this.oscillators[channel].frequency.value = voice.hz;
+        }
+      }
+      return;
+    }
+    if (chip === 'nes') {
+      if (this.waveGain) {
+        this.waveGain.gain.value = 0;
+      }
+      const nes = frame as NesFrame;
+      for (let channel = 0; channel < 4; channel += 1) {
+        const voice = nes.channels[channel];
+        const on = voice.amp > 0 && voice.hz > 0 && voice.wave !== 'none' && audible(channel);
+        if (voice.wave === 'noise') {
+          if (this.gains[channel]) {
+            this.gains[channel].gain.value = 0;
+          }
+          if (this.noiseGains[channel]) {
+            this.noiseGains[channel].gain.value = on ? voice.amp * 0.12 : 0;
+            const noiseNode = this.noiseNodes[channel];
+            if (noiseNode && on) {
+              noiseNode.playbackRate.value = Math.max(0.25, voice.hz / 200);
+            }
+          }
+          continue;
+        }
+        if (this.noiseGains[channel]) {
+          this.noiseGains[channel].gain.value = 0;
+        }
+        this.gains[channel].gain.value = on ? voice.amp * 0.12 : 0;
+        if (on && this.oscillators[channel]) {
+          this.oscillators[channel].type = voice.wave === 'triangle' ? 'triangle' : 'square';
           this.oscillators[channel].frequency.value = voice.hz;
         }
       }

@@ -1,8 +1,5 @@
 import type { AyFrame } from '@chippy/engines';
 
-const YM_CLOCK = 1_500_000;
-const YM_RATE = 50;
-
 function ascii(value: string): number[] {
   return [...value].map((character) => character.charCodeAt(0));
 }
@@ -16,7 +13,12 @@ function writeUint16(target: number[], value: number): void {
 }
 
 /** Uncompressed interleaved YM6, the form ST-Sound and most players expect. */
-export function encodeYm6(frames: AyFrame[], name: string): Uint8Array {
+export function encodeYm6(
+  frames: AyFrame[],
+  name: string,
+  clockHz = 1_500_000,
+  frameRate = 50,
+): Uint8Array {
   if (frames.length === 0) {
     throw new Error('There are no frames to export.');
   }
@@ -29,8 +31,8 @@ export function encodeYm6(frames: AyFrame[], name: string): Uint8Array {
   writeUint32(bytes, frames.length);
   writeUint32(bytes, 0);
   writeUint16(bytes, 0);
-  writeUint32(bytes, YM_CLOCK);
-  writeUint16(bytes, YM_RATE);
+  writeUint32(bytes, clockHz);
+  writeUint16(bytes, frameRate);
   writeUint32(bytes, 0);
   writeUint16(bytes, 0);
   for (let register = 0; register < 16; register += 1) {

@@ -36,6 +36,8 @@
 
 .top-right { margin-left: auto; }
 
+.chip-select { min-width: 7.8rem; }
+
 .btn-from-cursor { min-width: 7.5rem; }
 .btn-loop { min-width: 7.5rem; }
 .btn-undo, .btn-redo { min-width: 4.5rem; }

@@ -9,13 +9,76 @@ import {
   songForRender,
   updateInstrument,
 } from '@chippy/domain';
-import { framesPerRow, midiToHz, renderSong } from '@chippy/engines';
+import {
+  ayPeriod,
+  framesPerRow,
+  midiToHz,
+  nesDutyFraction,
+  nesTimer,
+  renderSong,
+  softNesChannelFrame,
+} from '@chippy/engines';
 
 describe('timing helpers', () => {
   it('computes hz and frames per row', () => {
     expect(midiToHz(69)).toBeCloseTo(440, 5);
     expect(framesPerRow(120, 50)).toBeGreaterThan(0);
     expect(framesPerRow(1, 50)).toBeGreaterThan(0);
+    expect(ayPeriod(69, 2_000_000)).toBeGreaterThan(ayPeriod(69, 1_500_000));
+    expect(nesTimer(60)).toBeGreaterThan(0);
+    expect(nesDutyFraction(0)).toBe(0.125);
+    expect(nesDutyFraction(2)).toBe(0.5);
+  });
+});
+
+describe('soft NES helpers', () => {
+  it('covers envelope rise, silence, and decaying volume', () => {
+    expect(softNesChannelFrame({
+      midi: null,
+      active: true,
+      wave: 'pulse',
+      duty: 2,
+      volume: 12,
+      envelopeDown: true,
+      envelopePeriod: 1,
+      noiseShort: false,
+      gateAge: 1,
+    }).wave).toBe('none');
+    const rising = softNesChannelFrame({
+      midi: 60,
+      active: true,
+      wave: 'pulse',
+      duty: 1,
+      volume: 8,
+      envelopeDown: false,
+      envelopePeriod: 1,
+      noiseShort: false,
+      gateAge: 5,
+    });
+    expect(rising.amp).toBeGreaterThan(8 / 15);
+    const decayed = softNesChannelFrame({
+      midi: 60,
+      active: true,
+      wave: 'pulse',
+      duty: 2,
+      volume: 2,
+      envelopeDown: true,
+      envelopePeriod: 1,
+      noiseShort: false,
+      gateAge: 40,
+    });
+    expect(decayed.wave).toBe('none');
+    expect(softNesChannelFrame({
+      midi: 60,
+      active: true,
+      wave: 'triangle',
+      duty: 2,
+      volume: 15,
+      envelopeDown: true,
+      envelopePeriod: 0,
+      noiseShort: false,
+      gateAge: 1,
+    }).wave).toBe('triangle');
   });
 });
 
@@ -161,6 +224,52 @@ describe('renderSong', () => {
     expect(rendered.frames[0].voices[0].hz).toBeGreaterThan(0);
     expect(rendered.frames[0].voices[0].amp).toBeGreaterThan(0);
     expect(rendered.frames[0].voices[0].wave).toBe('square');
+  });
+
+  it('renders Atari ST AY frames with 2 MHz periods', () => {
+    const st = renderSong(songForRender(enterNote(newSession('atarist'), 69).project));
+    const vx = renderSong(songForRender(enterNote(newSession('vectrex'), 69).project));
+    expect(st.chip).toBe('atarist');
+    expect(vx.chip).toBe('vectrex');
+    if (st.chip !== 'atarist' || vx.chip !== 'vectrex') {
+      return;
+    }
+    const stPeriod = st.frames[0][0] | ((st.frames[0][1] & 0x0f) << 8);
+    const vxPeriod = vx.frames[0][0] | ((vx.frames[0][1] & 0x0f) << 8);
+    expect(stPeriod).toBeGreaterThan(vxPeriod);
+    expect(st.frames[0][8] & 0x0f).toBeGreaterThan(0);
+  });
+
+  it('renders soft NES pulse triangle and noise', () => {
+    let state = newSession('nes');
+    state = updateInstrument(state, state.project.armedInstrumentId, {
+      envelopePeriod: 0,
+      envelopeDown: false,
+      envelopeStart: 12,
+    });
+    state = enterNote(state, 60);
+    state = { ...state, cursor: { ...state.cursor, channel: 2, row: 0 } };
+    state = addInstrument(state, 'triangle');
+    state = enterNote(state, 48);
+    state = { ...state, cursor: { ...state.cursor, channel: 3, row: 0 } };
+    state = addInstrument(state, 'noise');
+    state = updateInstrument(state, state.project.armedInstrumentId, {
+      noiseShort: true,
+      envelopePeriod: 1,
+      envelopeDown: true,
+      envelopeStart: 10,
+    });
+    state = enterNote(state, 40);
+    const rendered = renderSong(songForRender(state.project));
+    expect(rendered.chip).toBe('nes');
+    if (rendered.chip !== 'nes') {
+      return;
+    }
+    expect(rendered.frames[0].channels[0].wave).toBe('pulse');
+    expect(rendered.frames[0].channels[0].hz).toBeGreaterThan(0);
+    expect(rendered.frames[0].channels[2].wave).toBe('triangle');
+    expect(rendered.frames[0].channels[3].wave).toBe('noise');
+    expect(rendered.frames[0].channels[3].noiseShort).toBe(true);
   });
 
   it('honors delay and volume-slide FX on all chips', () => {

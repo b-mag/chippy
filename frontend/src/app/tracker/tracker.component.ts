@@ -150,16 +150,26 @@ export class TrackerComponent {
   });
   readonly presets = computed(() => presetsForChip(this.project().chip));
   readonly premiumUnlocked = computed(() => this.entitlement.canUsePremiumPresets());
-  readonly showSnip = computed(() => this.project().chip === 'vectrex');
+  readonly showSnip = computed(() => {
+    const chip = this.project().chip;
+    return chip === 'vectrex' || chip === 'atarist';
+  });
   readonly exportKinds = computed(() => {
-    if (this.project().chip === 'gameboy') {
+    const chip = this.project().chip;
+    if (chip === 'gameboy') {
       return [
         { id: 'wav' as const, label: 'WAV' },
         { id: 'vgm' as const, label: 'VGM' },
       ];
     }
-    if (this.project().chip === 'c64') {
+    if (chip === 'c64' || chip === 'nes') {
       return [{ id: 'wav' as const, label: 'WAV' }];
+    }
+    if (chip === 'atarist') {
+      return [
+        { id: 'wav' as const, label: 'WAV' },
+        { id: 'ym' as const, label: 'YM6' },
+      ];
     }
     return [
       { id: 'wav' as const, label: 'WAV' },
@@ -196,6 +206,7 @@ export class TrackerComponent {
       tone: 'Tone',
       snip: 'Snip',
       sid: 'SID',
+      triangle: 'Triangle',
     };
     return labels[kind];
   }
@@ -205,7 +216,7 @@ export class TrackerComponent {
   }
 
   chipOptionLabel(id: string): string {
-    if (id === 'gameboy' || id === 'vectrex' || id === 'c64') {
+    if (id === 'gameboy' || id === 'vectrex' || id === 'c64' || id === 'atarist' || id === 'nes') {
       return chipLabel(id);
     }
     return id;
@@ -719,7 +730,7 @@ export class TrackerComponent {
   }
 
   chipChange(id: string): void {
-    if (id !== 'gameboy' && id !== 'vectrex' && id !== 'c64') {
+    if (id !== 'gameboy' && id !== 'vectrex' && id !== 'c64' && id !== 'atarist' && id !== 'nes') {
       return;
     }
     if (id === this.project().chip) {
@@ -738,7 +749,7 @@ export class TrackerComponent {
     void this.finishChipChange(id, saveFirst);
   }
 
-  private async finishChipChange(id: 'gameboy' | 'vectrex' | 'c64', saveFirst: boolean): Promise<void> {
+  private async finishChipChange(id: 'gameboy' | 'vectrex' | 'c64' | 'atarist' | 'nes', saveFirst: boolean): Promise<void> {
     if (saveFirst) {
       await this.save();
     }

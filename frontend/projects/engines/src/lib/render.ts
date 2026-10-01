@@ -1,4 +1,5 @@
 import { chipDefinition, type Cell, type CellEffect, type Instrument, type Song } from '@chippy/domain';
+import { emptyNesFrame, softNesChannelFrame, type NesFrame, type SoftNesChannelParams } from './soft-nes';
 import { emptySidFrame, softSidVoiceFrame, type SidFrame, type SoftSidVoiceParams } from './soft-sid';
 import { ayPeriod, framesPerRow, gbFrequency } from './timing';
 
@@ -26,11 +27,18 @@ export interface GbFrame {
 }
 
 export type { SidFrame };
+export type { NesFrame };
 
 export type RenderedSong =
   | { chip: 'vectrex'; frameRate: number; framesPerRow: number; frames: AyFrame[] }
+  | { chip: 'atarist'; frameRate: number; framesPerRow: number; frames: AyFrame[] }
   | { chip: 'gameboy'; frameRate: number; framesPerRow: number; frames: GbFrame[] }
-  | { chip: 'c64'; frameRate: number; framesPerRow: number; frames: SidFrame[] };
+  | { chip: 'c64'; frameRate: number; framesPerRow: number; frames: SidFrame[] }
+  | { chip: 'nes'; frameRate: number; framesPerRow: number; frames: NesFrame[] };
+
+function isAyChip(chip: Song['chip']): chip is 'vectrex' | 'atarist' {
+  return chip === 'vectrex' || chip === 'atarist';
+}
 
 /** Four built-in 32-sample waveforms. Values are 4-bit, 0 through 15. */
 export const WAVEFORMS: number[][] = [
@@ -238,6 +246,7 @@ function aySoftVolume(instrument: Instrument | undefined, baseVolume: number, ga
 }
 
 function ayFrame(song: Song, voices: Voice[]): AyFrame {
+  const clockHz = chipDefinition(song.chip).clockHz;
   const frame = new Array<number>(16).fill(0);
   let mixer = 0x3f;
   let noisePeriod = 0;
@@ -254,7 +263,7 @@ function ayFrame(song: Song, voices: Voice[]): AyFrame {
     const age = Math.max(0, voice.gateAge - 1);
     const pitchOffset = macroAt(instrument?.pitchMacro, age) ?? 0;
     const midi = soundingMidi(voice, pitchOffset);
-    let period = midi === null ? 0 : ayPeriod(midi);
+    let period = midi === null ? 0 : ayPeriod(midi, clockHz);
     let volume = voice.volume ?? instrument?.envelopeStart ?? 12;
     const volumeMacro = macroAt(instrument?.volumeMacro, age);
     if (volumeMacro !== null) {
@@ -412,12 +421,36 @@ function sidFrame(song: Song, voices: Voice[]): SidFrame {
   return frame;
 }
 
+function nesParamsFromVoice(song: Song, voice: Voice, wave: SoftNesChannelParams['wave']): SoftNesChannelParams {
+  const instrument = instrumentOf(song, voice.instrumentId);
+  return {
+    midi: soundingMidi(voice),
+    active: voice.active,
+    wave,
+    duty: (instrument?.duty ?? 2) as 0 | 1 | 2 | 3,
+    volume: voice.volume ?? instrument?.envelopeStart ?? 12,
+    envelopeDown: instrument?.envelopeDown ?? true,
+    envelopePeriod: instrument?.envelopePeriod ?? 3,
+    noiseShort: instrument?.noiseShort ?? false,
+    gateAge: voice.gateAge,
+  };
+}
+
+function nesFrame(song: Song, voices: Voice[]): NesFrame {
+  const frame = emptyNesFrame();
+  frame.channels[0] = softNesChannelFrame(nesParamsFromVoice(song, voices[0], 'pulse'));
+  frame.channels[1] = softNesChannelFrame(nesParamsFromVoice(song, voices[1], 'pulse'));
+  frame.channels[2] = softNesChannelFrame(nesParamsFromVoice(song, voices[2], 'triangle'));
+  frame.channels[3] = softNesChannelFrame(nesParamsFromVoice(song, voices[3], 'noise'));
+  return frame;
+}
+
 /** Render the whole order list to register frames. Muted channels are applied later, at playback. */
 export function renderSong(song: Song): RenderedSong {
   const definition = chipDefinition(song.chip);
   const perRow = framesPerRow(song.tempo, definition.frameRate);
   const voices = silentVoices(definition.channels.length);
-  const frames: AyFrame[] | GbFrame[] | SidFrame[] = [];
+  const frames: AyFrame[] | GbFrame[] | SidFrame[] | NesFrame[] = [];
   for (const patternId of song.order) {
     const pattern = song.patterns.find((item) => item.id === patternId);
     if (!pattern) {
@@ -427,10 +460,12 @@ export function renderSong(song: Song): RenderedSong {
       applyRow(voices, row);
       for (let tick = 0; tick < perRow; tick += 1) {
         voices.forEach(tickVoiceFx);
-        if (song.chip === 'vectrex') {
+        if (isAyChip(song.chip)) {
           (frames as AyFrame[]).push(ayFrame(song, voices));
         } else if (song.chip === 'c64') {
           (frames as SidFrame[]).push(sidFrame(song, voices));
+        } else if (song.chip === 'nes') {
+          (frames as NesFrame[]).push(nesFrame(song, voices));
         } else {
           (frames as GbFrame[]).push(gbFrame(song, voices));
         }
@@ -440,8 +475,14 @@ export function renderSong(song: Song): RenderedSong {
   if (song.chip === 'vectrex') {
     return { chip: 'vectrex', frameRate: definition.frameRate, framesPerRow: perRow, frames: frames as AyFrame[] };
   }
+  if (song.chip === 'atarist') {
+    return { chip: 'atarist', frameRate: definition.frameRate, framesPerRow: perRow, frames: frames as AyFrame[] };
+  }
   if (song.chip === 'c64') {
     return { chip: 'c64', frameRate: definition.frameRate, framesPerRow: perRow, frames: frames as SidFrame[] };
+  }
+  if (song.chip === 'nes') {
+    return { chip: 'nes', frameRate: definition.frameRate, framesPerRow: perRow, frames: frames as NesFrame[] };
   }
   return { chip: 'gameboy', frameRate: definition.frameRate, framesPerRow: perRow, frames: frames as GbFrame[] };
 }

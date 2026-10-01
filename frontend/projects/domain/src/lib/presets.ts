@@ -179,6 +179,70 @@ export const INSTRUMENT_PRESETS: InstrumentPreset[] = [
     wavePulse: false,
     ringMod: true,
   }),
+  // Atari ST free
+  preset('st-tone-lead', 'Soft lead', 'atarist', 'tone', false, {
+    envelopeStart: 12,
+    envelopeDown: true,
+    envelopePeriod: 2,
+    hardwareEnvelope: false,
+    mixNoise: false,
+  }),
+  preset('st-tone-bass', 'Soft bass', 'atarist', 'tone', false, {
+    envelopeStart: 14,
+    envelopeDown: true,
+    envelopePeriod: 3,
+    hardwareEnvelope: false,
+    mixNoise: false,
+  }),
+  preset('st-noise-hit', 'Noise hit', 'atarist', 'tone', false, {
+    envelopeStart: 12,
+    envelopeDown: true,
+    envelopePeriod: 1,
+    mixNoise: true,
+    noisePeriod: 4,
+    hardwareEnvelope: false,
+  }),
+  // Atari ST premium
+  preset('st-hard-env', 'Hard envelope', 'atarist', 'tone', true, {
+    envelopeStart: 15,
+    hardwareEnvelope: true,
+    hardwareEnvelopePeriod: 0x1000,
+    hardwareEnvelopeShape: 0x0e,
+    mixNoise: false,
+  }),
+  // NES free
+  preset('nes-pulse-lead', 'Pulse lead', 'nes', 'pulse', false, {
+    duty: 2,
+    envelopeStart: 12,
+    envelopeDown: true,
+    envelopePeriod: 3,
+  }),
+  preset('nes-pulse-bass', 'Pulse bass', 'nes', 'pulse', false, {
+    duty: 1,
+    envelopeStart: 14,
+    envelopeDown: true,
+    envelopePeriod: 5,
+  }),
+  preset('nes-tri-bass', 'Triangle bass', 'nes', 'triangle', false, { envelopeStart: 15 }),
+  preset('nes-noise-snare', 'Noise snare', 'nes', 'noise', false, {
+    envelopeStart: 12,
+    envelopeDown: true,
+    envelopePeriod: 2,
+    noiseShort: false,
+  }),
+  // NES premium
+  preset('nes-pulse-soft', 'Soft pulse', 'nes', 'pulse', true, {
+    duty: 3,
+    envelopeStart: 10,
+    envelopeDown: true,
+    envelopePeriod: 4,
+  }),
+  preset('nes-noise-hat', 'Noise hat', 'nes', 'noise', true, {
+    envelopeStart: 8,
+    envelopeDown: true,
+    envelopePeriod: 1,
+    noiseShort: true,
+  }),
 ];
 
 export function presetsForChip(chip: ChipId): InstrumentPreset[] {

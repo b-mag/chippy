@@ -10,7 +10,7 @@ export function midiToHz(midi: number): number {
 }
 
 /**
- * AY-3-8912 tone period. The chip divides its clock by 16, then by this
+ * AY-3-8912 / YM2149 tone period. The chip divides its clock by 16, then by this
  * 12-bit period, to produce the tone.
  */
 export function ayPeriod(midi: number, clockHz = 1_500_000): number {
@@ -22,6 +22,15 @@ export function ayPeriod(midi: number, clockHz = 1_500_000): number {
 export function gbFrequency(midi: number): number {
   const value = Math.round(2048 - 131072 / midiToHz(midi));
   return Math.min(2047, Math.max(0, value));
+}
+
+/**
+ * NES 2A03 pulse/triangle timer period (11-bit).
+ * `hz ≈ clockHz / (16 * (timer + 1))`.
+ */
+export function nesTimer(midi: number, clockHz = 1_789_773): number {
+  const period = Math.round(clockHz / (16 * midiToHz(midi))) - 1;
+  return Math.min(2047, Math.max(0, period));
 }
 
 /**

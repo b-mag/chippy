@@ -194,6 +194,34 @@ const gameboy: ChipDefinition = {
   },
 };
 
+/** AY fields shared by Vectrex and Atari ST (YM2149). */
+const ayFields: InstrumentField[] = [
+  { key: 'envelopeStart', label: 'Level', control: 'knob', min: 0, max: 15, kinds: ['tone'] },
+  { key: 'envelopeDown', label: 'Soft env falls', control: 'toggle', kinds: ['tone'] },
+  { key: 'envelopePeriod', label: 'Soft env rate', control: 'knob', min: 0, max: 7, kinds: ['tone'] },
+  { key: 'hardwareEnvelope', label: 'Hardware envelope', control: 'toggle', kinds: ['tone'] },
+  {
+    key: 'hardwareEnvelopePeriod',
+    label: 'HW env period',
+    control: 'knob',
+    min: 0,
+    max: 65535,
+    kinds: ['tone'],
+  },
+  {
+    key: 'hardwareEnvelopeShape',
+    label: 'HW env shape',
+    control: 'select',
+    options: ayEnvelopeShapes,
+    kinds: ['tone'],
+  },
+  { key: 'mixNoise', label: 'Noise', control: 'toggle', kinds: ['tone'] },
+  { key: 'noisePeriod', label: 'Noise period', control: 'knob', min: 0, max: 31, kinds: ['tone'] },
+  { key: 'volumeMacro', label: 'Volume macro', control: 'macro', min: 0, max: 15, kinds: ['tone'] },
+  { key: 'pitchMacro', label: 'Pitch macro', control: 'macro', min: -24, max: 24, kinds: ['tone'] },
+  { key: 'noiseMacro', label: 'Noise macro', control: 'macro', min: 0, max: 31, kinds: ['tone'] },
+];
+
 const vectrex: ChipDefinition = {
   id: 'vectrex',
   label: 'Vectrex',
@@ -206,32 +234,7 @@ const vectrex: ChipDefinition = {
     { id: 'tone3', label: 'Tone 3' },
   ],
   kinds: ['tone', 'snip'],
-  fields: [
-    { key: 'envelopeStart', label: 'Level', control: 'knob', min: 0, max: 15, kinds: ['tone'] },
-    { key: 'envelopeDown', label: 'Soft env falls', control: 'toggle', kinds: ['tone'] },
-    { key: 'envelopePeriod', label: 'Soft env rate', control: 'knob', min: 0, max: 7, kinds: ['tone'] },
-    { key: 'hardwareEnvelope', label: 'Hardware envelope', control: 'toggle', kinds: ['tone'] },
-    {
-      key: 'hardwareEnvelopePeriod',
-      label: 'HW env period',
-      control: 'knob',
-      min: 0,
-      max: 65535,
-      kinds: ['tone'],
-    },
-    {
-      key: 'hardwareEnvelopeShape',
-      label: 'HW env shape',
-      control: 'select',
-      options: ayEnvelopeShapes,
-      kinds: ['tone'],
-    },
-    { key: 'mixNoise', label: 'Noise', control: 'toggle', kinds: ['tone'] },
-    { key: 'noisePeriod', label: 'Noise period', control: 'knob', min: 0, max: 31, kinds: ['tone'] },
-    { key: 'volumeMacro', label: 'Volume macro', control: 'macro', min: 0, max: 15, kinds: ['tone'] },
-    { key: 'pitchMacro', label: 'Pitch macro', control: 'macro', min: -24, max: 24, kinds: ['tone'] },
-    { key: 'noiseMacro', label: 'Noise macro', control: 'macro', min: 0, max: 31, kinds: ['tone'] },
-  ],
+  fields: ayFields,
   createDefaultInstrument() {
     return vectrexInstrument('tone');
   },
@@ -289,14 +292,91 @@ const c64: ChipDefinition = {
   },
 };
 
-const chips: Record<ChipId, ChipDefinition> = { gameboy, vectrex, c64 };
+function nesInstrument(kind: InstrumentKind): Instrument {
+  if (kind === 'triangle') {
+    return baseInstrument({ id: 'ins-1', name: 'Triangle', kind: 'triangle', envelopeStart: 15, envelopeDown: false, envelopePeriod: 0 });
+  }
+  if (kind === 'noise') {
+    return baseInstrument({ id: 'ins-1', name: 'Noise', kind: 'noise', envelopeStart: 10, envelopePeriod: 2 });
+  }
+  return baseInstrument({ id: 'ins-1', name: 'Pulse lead', kind: 'pulse' });
+}
+
+const atarist: ChipDefinition = {
+  id: 'atarist',
+  label: 'Atari ST',
+  /** YM2149 on the Atari ST is typically clocked at 2 MHz. Music frames are 50 Hz. */
+  clockHz: 2_000_000,
+  frameRate: 50,
+  channels: [
+    { id: 'tone1', label: 'Tone 1' },
+    { id: 'tone2', label: 'Tone 2' },
+    { id: 'tone3', label: 'Tone 3' },
+  ],
+  kinds: ['tone', 'snip'],
+  fields: ayFields,
+  createDefaultInstrument() {
+    return vectrexInstrument('tone');
+  },
+  createInstrument(kind: InstrumentKind) {
+    if (!this.kinds.includes(kind)) {
+      return this.createDefaultInstrument();
+    }
+    return vectrexInstrument(kind);
+  },
+  kindsForChannel() {
+    return ['tone', 'snip'];
+  },
+};
+
+const nes: ChipDefinition = {
+  id: 'nes',
+  label: 'NES',
+  /** NTSC 2A03 CPU clock; soft APU uses this for timer period math. */
+  clockHz: 1_789_773,
+  frameRate: 60,
+  channels: [
+    { id: 'pulse1', label: 'Pulse 1', alias: 'PU1' },
+    { id: 'pulse2', label: 'Pulse 2', alias: 'PU2' },
+    { id: 'triangle', label: 'Triangle', alias: 'TRI' },
+    { id: 'noise', label: 'Noise', alias: 'NOI' },
+  ],
+  kinds: ['pulse', 'triangle', 'noise'],
+  fields: [
+    { key: 'duty', label: 'Duty', control: 'select', options: dutyOptions, kinds: ['pulse'] },
+    { key: 'envelopeStart', label: 'Envelope level', control: 'knob', min: 0, max: 15, kinds: ['pulse', 'noise'] },
+    { key: 'envelopeDown', label: 'Envelope falls', control: 'toggle', kinds: ['pulse', 'noise'] },
+    { key: 'envelopePeriod', label: 'Envelope period', control: 'knob', min: 0, max: 7, kinds: ['pulse', 'noise'] },
+    { key: 'noiseShort', label: 'Short noise', control: 'toggle', kinds: ['noise'] },
+  ],
+  createDefaultInstrument() {
+    return nesInstrument('pulse');
+  },
+  createInstrument(kind: InstrumentKind) {
+    if (!this.kinds.includes(kind)) {
+      return this.createDefaultInstrument();
+    }
+    return nesInstrument(kind);
+  },
+  kindsForChannel(channelId: string) {
+    if (channelId === 'triangle') {
+      return ['triangle'];
+    }
+    if (channelId === 'noise') {
+      return ['noise'];
+    }
+    return ['pulse'];
+  },
+};
+
+const chips: Record<ChipId, ChipDefinition> = { gameboy, vectrex, c64, atarist, nes };
 
 export function chipDefinition(id: ChipId): ChipDefinition {
   return chips[id];
 }
 
 export function chipIds(): ChipId[] {
-  return ['gameboy', 'vectrex', 'c64'];
+  return ['gameboy', 'vectrex', 'c64', 'atarist', 'nes'];
 }
 
 export function chipLabel(id: ChipId): string {

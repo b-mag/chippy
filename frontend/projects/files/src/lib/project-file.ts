@@ -13,7 +13,7 @@ import {
   type SongBody,
 } from '@chippy/domain';
 
-const CHIP_IDS: ChipId[] = ['gameboy', 'vectrex', 'c64'];
+const CHIP_IDS: ChipId[] = ['gameboy', 'vectrex', 'c64', 'atarist', 'nes'];
 const EFFECT_CMDS = new Set<EffectCmd>(['A', 'U', 'D', 'R', 'C', 'P']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -125,7 +125,7 @@ function normalizeSongBody(raw: Record<string, unknown>, index: number): SongBod
 }
 
 function isChipId(value: unknown): value is ChipId {
-  return value === 'gameboy' || value === 'vectrex' || value === 'c64';
+  return CHIP_IDS.includes(value as ChipId);
 }
 
 function migrateV1(parsed: Record<string, unknown>): Project {

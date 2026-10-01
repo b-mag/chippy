@@ -2,7 +2,7 @@
   <header class="top">
     <div class="top-left">
       <label>Chip
-        <select [value]="project().chip" [attr.data-epoch]="chipSelectEpoch()" (change)="chipChange(($any($event.target)).value)">
+        <select class="chip-select" [value]="project().chip" [attr.data-epoch]="chipSelectEpoch()" (change)="chipChange(($any($event.target)).value)">
           @for (id of chips; track id) {
             <option [value]="id">{{ chipOptionLabel(id) }}</option>
           }
@@ -285,8 +285,14 @@
         @if (hardwareFields().length === 0) {
           <p class="hardware-empty">No hardware controls for this type.</p>
         }
-        @if (project().chip === 'vectrex' && armed().kind === 'tone') {
-          <p class="hardware-hint">Noise and hardware envelope need YM6 export; AKY is software tones only.</p>
+        @if ((project().chip === 'vectrex' || project().chip === 'atarist') && armed().kind === 'tone') {
+          <p class="hardware-hint">
+            @if (project().chip === 'vectrex') {
+              Noise and hardware envelope need YM6 export; AKY is software tones only.
+            } @else {
+              Noise and hardware envelope export via YM6.
+            }
+          </p>
         }
       </div>
     </div>

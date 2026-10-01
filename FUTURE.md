@@ -28,9 +28,8 @@ Exporter that maps Chippy’s flat Song Order + patterns into LSDJ’s chain/phr
 
 ## More chips and tools
 
-- Atari ST (YM2149; reuse AY path)
-- NES (2A03)
 - Dedicated YM Player (full-file listen beyond snip)
+- Deeper NES (DMC channel, NES VGM export)
 - Deeper SID (6581 vs 8580, accurate filter, `.sid` dump, C64 snip)
 
 ## Chippy-owned YM Radio
