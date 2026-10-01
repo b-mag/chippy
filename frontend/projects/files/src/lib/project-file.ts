@@ -1,20 +1,28 @@
 import {
   LEGACY_PROJECT_VERSION,
   PROJECT_VERSION,
+  PROJECT_VERSION_V2,
   baseInstrument,
+  defaultRoleForKind,
   type Cell,
   type CellEffect,
   type ChipId,
+  type CustomInstrumentPreset,
   type EffectCmd,
   type Instrument,
   type InstrumentKind,
   type Pattern,
+  type PresetRole,
   type Project,
   type SongBody,
 } from '@chippy/domain';
 
 const CHIP_IDS: ChipId[] = ['gameboy', 'vectrex', 'c64', 'atarist', 'nes'];
 const EFFECT_CMDS = new Set<EffectCmd>(['A', 'U', 'D', 'R', 'C', 'P']);
+const PRESET_ROLES = new Set<PresetRole>(['lead', 'bass', 'percussion', 'pad', 'fx']);
+const INSTRUMENT_KINDS = new Set<InstrumentKind>([
+  'pulse', 'wave', 'noise', 'tone', 'snip', 'sid', 'triangle',
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -128,6 +136,39 @@ function isChipId(value: unknown): value is ChipId {
   return CHIP_IDS.includes(value as ChipId);
 }
 
+function normalizeCustomPreset(raw: unknown, index: number, fallbackChip: ChipId): CustomInstrumentPreset | null {
+  if (!isRecord(raw)) {
+    return null;
+  }
+  const kindRaw = raw['kind'];
+  if (typeof kindRaw !== 'string' || !INSTRUMENT_KINDS.has(kindRaw as InstrumentKind)) {
+    return null;
+  }
+  const kind = kindRaw as InstrumentKind;
+  const chip = isChipId(raw['chip']) ? raw['chip'] : fallbackChip;
+  const roleRaw = raw['role'];
+  const role = typeof roleRaw === 'string' && PRESET_ROLES.has(roleRaw as PresetRole)
+    ? (roleRaw as PresetRole)
+    : defaultRoleForKind(kind);
+  const id = typeof raw['id'] === 'string' && raw['id'] ? String(raw['id']) : `custom-${index + 1}`;
+  const name = typeof raw['name'] === 'string' && raw['name'].trim()
+    ? String(raw['name']).trim().slice(0, 40)
+    : `Custom ${index + 1}`;
+  const patchRaw = isRecord(raw['patch']) ? raw['patch'] : raw;
+  const normalized = normalizeInstrument({ ...patchRaw, kind, id: 'tmp', name: 'tmp' }, index);
+  const { id: _id, name: _name, ...patch } = normalized;
+  return { id, name, chip, kind, role, patch };
+}
+
+function normalizeCustomPresets(raw: unknown, chip: ChipId): CustomInstrumentPreset[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .map((item, index) => normalizeCustomPreset(item, index, chip))
+    .filter((item): item is CustomInstrumentPreset => item !== null);
+}
+
 function migrateV1(parsed: Record<string, unknown>): Project {
   const chip = parsed['chip'];
   if (!isChipId(chip)) {
@@ -157,13 +198,17 @@ function migrateV1(parsed: Record<string, unknown>): Project {
     armedInstrumentId: String(parsed['armedInstrumentId'] ?? ''),
     songs: [body],
     activeSongId: body.id,
+    customPresets: [],
   };
 }
 
-function parseV2(parsed: Record<string, unknown>): Project {
+function parseProjectBody(parsed: Record<string, unknown>, allowCustom: boolean): Project {
   const allowed = new Set([
     'version', 'name', 'chip', 'instruments', 'armedInstrumentId', 'songs', 'activeSongId',
   ]);
+  if (allowCustom) {
+    allowed.add('customPresets');
+  }
   for (const key of Object.keys(parsed)) {
     if (!allowed.has(key)) {
       reject(`Unknown project field "${key}".`);
@@ -196,6 +241,7 @@ function parseV2(parsed: Record<string, unknown>): Project {
     armedInstrumentId: String(parsed['armedInstrumentId'] ?? ''),
     songs,
     activeSongId,
+    customPresets: allowCustom ? normalizeCustomPresets(parsed['customPresets'], chip) : [],
   };
 }
 
@@ -222,10 +268,13 @@ export function parseProject(raw: string): Project {
     }
     return migrateV1(parsed);
   }
+  if (version === PROJECT_VERSION_V2) {
+    return parseProjectBody(parsed, false);
+  }
   if (version !== PROJECT_VERSION) {
     reject('Unsupported project version.');
   }
-  const project = parseV2(parsed);
+  const project = parseProjectBody(parsed, true);
   if (!CHIP_IDS.includes(project.chip)) {
     reject('Unknown chip.');
   }
@@ -233,7 +282,11 @@ export function parseProject(raw: string): Project {
 }
 
 export function serializeProject(project: Project): string {
-  return JSON.stringify({ ...project, version: PROJECT_VERSION }, null, 2);
+  return JSON.stringify({
+    ...project,
+    version: PROJECT_VERSION,
+    customPresets: project.customPresets ?? [],
+  }, null, 2);
 }
 
 export function downloadName(project: { name: string }, extension: string): string {

@@ -33,20 +33,25 @@
     </div>
     <div class="top-right">
       <button type="button" class="btn-save" (click)="save()">Save Project</button>
-      <label class="file">Open Project
-        <input type="file" accept=".json,application/json" (change)="open(($any($event.target)).files?.[0])" />
-      </label>
-      <button type="button" (click)="exportOpen.set(!exportOpen())">Export</button>
+      <button type="button" class="btn-open" (click)="pickOpenProject()">Open Project</button>
+      <input
+        #openProjectInput
+        class="open-project-input"
+        type="file"
+        accept=".json,application/json"
+        (change)="onOpenProjectSelected($event)" />
+      <div class="export-wrap">
+        <button type="button" (click)="toggleExport($event)">Export</button>
+        @if (exportOpen()) {
+          <div class="export-menu" role="menu" (click)="$event.stopPropagation()">
+            @for (item of exportKinds(); track item.id) {
+              <button type="button" role="menuitem" (click)="exportFile(item.id)">{{ item.label }}</button>
+            }
+          </div>
+        }
+      </div>
     </div>
   </header>
-
-  @if (exportOpen()) {
-    <div class="menu">
-      @for (item of exportKinds(); track item.id) {
-        <button type="button" (click)="exportFile(item.id)">{{ item.label }}</button>
-      }
-    </div>
-  }
 
   <aside class="order">
     <h2 title="Playlist of patterns. Click a slot to edit that pattern in the Pattern grid.">Song Order</h2>
@@ -174,7 +179,7 @@
       }
     </ul>
 
-    <div class="instrument-controls">
+    <div class="instrument-editor">
       <label>Name
         <input
           [value]="armed().name"
@@ -200,37 +205,6 @@
         }
       </div>
       <p class="audition-hint">Keys Z–M / Q–U test the armed sound here without writing the grid.</p>
-
-      <div class="instrument-actions">
-        <button type="button" (click)="session.addInstrument()">Add instrument</button>
-        <button type="button" (click)="presetsOpen.set(!presetsOpen())">Add from presets…</button>
-        <button type="button" [disabled]="project().instruments.length <= 1" (click)="deleteArmed()">Delete instrument</button>
-        @if (showSnip()) {
-          <a class="snip-link" routerLink="/listen">Snip a YM</a>
-        }
-      </div>
-
-      @if (presetsOpen()) {
-        <div class="preset-menu">
-          @for (preset of presets(); track preset.id) {
-            <button
-              type="button"
-              class="preset-item"
-              [class.locked]="preset.premium && !premiumUnlocked()"
-              (click)="addPreset(preset)">
-              {{ preset.name }}
-              @if (preset.premium) {
-                <span class="preset-tag">{{ premiumUnlocked() ? 'Premium' : 'Locked' }}</span>
-              }
-            </button>
-          }
-          @if (presetStatus()) {
-            <p class="preset-status">{{ presetStatus() }}</p>
-          }
-        </div>
-      }
-
-      <hr class="studio-sep" />
 
       <div class="studio-hardware">
         <h3>{{ chip().label }} · {{ kindLabel(armed().kind) }}</h3>
@@ -295,6 +269,60 @@
           </p>
         }
       </div>
+    </div>
+
+    <div class="instrument-actions">
+      <button type="button" (click)="session.addInstrument()">Add instrument</button>
+      <button type="button" (click)="presetsOpen.set(!presetsOpen())">Add from presets…</button>
+      <button type="button" (click)="saveArmedAsCustom()">Save as custom…</button>
+      <button type="button" [disabled]="project().instruments.length <= 1" (click)="deleteArmed()">Delete instrument</button>
+      @if (showSnip()) {
+        <a class="snip-link" routerLink="/listen">Snip a YM</a>
+      }
+
+      @if (presetsOpen()) {
+        <div class="preset-menu">
+          @for (roleGroup of presetGroups(); track roleGroup.role) {
+            <div class="preset-role">
+              <h4 class="preset-role-title">{{ roleGroup.label }}</h4>
+              @for (kindGroup of roleGroup.kinds; track kindGroup.kind) {
+                <div class="preset-kind">
+                  <h5 class="preset-kind-title">{{ kindGroup.label }}</h5>
+                  @for (entry of kindGroup.entries; track entry.id) {
+                    <div class="preset-row">
+                      <button
+                        type="button"
+                        class="preset-item"
+                        [class.locked]="entry.premium && !premiumUnlocked()"
+                        (click)="addPresetEntry(entry)">
+                        <span>{{ entry.name }}</span>
+                        <span class="preset-tags">
+                          @if (entry.custom) {
+                            <span class="preset-tag">Custom</span>
+                          }
+                          @if (entry.premium) {
+                            <span class="preset-tag">{{ premiumUnlocked() ? 'Premium' : 'Locked' }}</span>
+                          }
+                        </span>
+                      </button>
+                      @if (entry.custom) {
+                        <button
+                          type="button"
+                          class="preset-remove"
+                          title="Remove custom preset"
+                          (click)="removeCustomEntry(entry, $event)">×</button>
+                      }
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+          }
+          @if (presetStatus()) {
+            <p class="preset-status">{{ presetStatus() }}</p>
+          }
+        </div>
+      }
     </div>
   </aside>
 

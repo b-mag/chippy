@@ -26,14 +26,30 @@ export interface SoftNesChannelParams {
   envelopeDown: boolean;
   envelopePeriod: number;
   noiseShort: boolean;
+  /** Optional per-frame volume override (0–15). */
+  volumeMacro: number[] | null;
+  /** Optional per-frame pitch offset in semitones. */
+  pitchMacro: number[] | null;
   /** Frames since gate on. */
   gateAge: number;
+}
+
+function macroAt(macro: number[] | null | undefined, age: number): number | null {
+  if (!macro || macro.length === 0) {
+    return null;
+  }
+  return macro[Math.min(age, macro.length - 1)] ?? null;
 }
 
 const DUTY_FRACTIONS = [0.125, 0.25, 0.5, 0.75];
 
 /** Soft volume envelope shared with Game Boy-style period/direction. */
 function softVolume(params: SoftNesChannelParams): number {
+  const age = Math.max(0, params.gateAge - 1);
+  const volumeMacro = macroAt(params.volumeMacro, age);
+  if (volumeMacro !== null) {
+    return Math.min(15, Math.max(0, volumeMacro));
+  }
   const base = Math.min(15, Math.max(0, params.volume));
   if (params.wave === 'triangle') {
     return params.active && params.midi !== null ? 15 : 0;
@@ -42,7 +58,7 @@ function softVolume(params: SoftNesChannelParams): number {
   if (rate <= 0) {
     return base;
   }
-  const steps = Math.floor(Math.max(0, params.gateAge - 1) / rate);
+  const steps = Math.floor(age / rate);
   const delta = params.envelopeDown === false ? steps : -steps;
   return Math.min(15, Math.max(0, base + delta));
 }
@@ -57,6 +73,9 @@ export function softNesChannelFrame(params: SoftNesChannelParams): NesChannelFra
   if (!params.active || params.midi === null) {
     return { hz: 0, amp: 0, wave: 'none', duty: 2, noiseShort: false };
   }
+  const age = Math.max(0, params.gateAge - 1);
+  const pitchOffset = macroAt(params.pitchMacro, age) ?? 0;
+  const midi = Math.min(127, Math.max(0, Math.round(params.midi + pitchOffset)));
   const level = softVolume(params);
   if (level <= 0) {
     return { hz: 0, amp: 0, wave: 'none', duty: params.duty, noiseShort: params.noiseShort };
@@ -64,7 +83,7 @@ export function softNesChannelFrame(params: SoftNesChannelParams): NesChannelFra
   const amp = level / 15;
   if (params.wave === 'noise') {
     return {
-      hz: nesNoiseHz(params.midi),
+      hz: nesNoiseHz(midi),
       amp,
       wave: 'noise',
       duty: params.duty,
@@ -72,7 +91,7 @@ export function softNesChannelFrame(params: SoftNesChannelParams): NesChannelFra
     };
   }
   return {
-    hz: midiToHz(params.midi),
+    hz: midiToHz(midi),
     // Web Audio / soft triangle is quieter than square at the same linear amp.
     amp: params.wave === 'triangle' ? Math.max(0.7, amp) : amp,
     wave: params.wave,

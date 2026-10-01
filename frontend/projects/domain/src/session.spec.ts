@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   activeSongBody,
   addInstrument,
+  addInstrumentFromCustomPreset,
   addInstrumentFromPreset,
   addPattern,
   addRandomPattern,
@@ -11,6 +12,11 @@ import {
   auditionChannelId,
   auditionChannelIndex,
   changeInstrumentKind,
+  defaultRoleForKind,
+  groupPresetsForMenu,
+  instrumentToPresetPatch,
+  presetKindLabel,
+  roleLabel,
   clearCell,
   clearPattern,
   deleteInstrument,
@@ -32,11 +38,13 @@ import {
   patternDisplayName,
   presetsForChip,
   redo,
+  removeCustomPreset,
   removeOrderEntry,
   removeSong,
   renameInstrument,
   renamePattern,
   reorderOrder,
+  saveCustomPreset,
   selectOrder,
   selectSong,
   setChip,
@@ -215,6 +223,42 @@ describe('session editing', () => {
     expect(presetsForChip('c64').length).toBeGreaterThan(0);
     expect(presetsForChip('atarist').length).toBeGreaterThan(0);
     expect(presetsForChip('nes').length).toBeGreaterThan(0);
+    expect(presetsForChip('nes').some((item) => item.id === 'nes-kick-bass' && item.premium)).toBe(true);
+    expect(defaultRoleForKind('triangle')).toBe('bass');
+    expect(defaultRoleForKind('noise')).toBe('percussion');
+    const groups = groupPresetsForMenu('nes', []);
+    expect(groups[0].label).toBe('Lead');
+    expect(groups.some((group) => group.kinds.some((kind) => kind.kind === 'triangle'))).toBe(true);
+  });
+
+  it('saves project custom presets and adds them to the instrument bank', () => {
+    let state = newSession('nes');
+    state = saveCustomPreset(state, 'Walk', 'bass');
+    expect(state.project.customPresets).toHaveLength(1);
+    expect(state.project.customPresets[0].name).toBe('Walk');
+    expect(state.project.customPresets[0].chip).toBe('nes');
+    const menu = groupPresetsForMenu('nes', state.project.customPresets);
+    const customEntry = menu
+      .flatMap((role) => role.kinds)
+      .flatMap((kind) => kind.entries)
+      .find((entry) => entry.custom);
+    expect(customEntry?.name).toBe('Walk');
+    state = addInstrumentFromCustomPreset(state, state.project.customPresets[0].id);
+    expect(state.project.instruments.some((item) => item.name === 'Walk')).toBe(true);
+    const customId = state.project.customPresets[0].id;
+    state = removeCustomPreset(state, customId);
+    expect(state.project.customPresets).toHaveLength(0);
+    expect(removeCustomPreset(state, customId)).toBe(state);
+    expect(addInstrumentFromCustomPreset(state, 'missing')).toBe(state);
+    expect(roleLabel('fx')).toBe('FX');
+    expect(presetKindLabel('triangle')).toBe('Triangle');
+    expect(defaultRoleForKind('snip')).toBe('fx');
+    expect(defaultRoleForKind('pulse')).toBe('lead');
+    const patch = instrumentToPresetPatch(state.project.instruments[0]);
+    expect(patch).not.toHaveProperty('id');
+    expect(patch).not.toHaveProperty('name');
+    state = saveCustomPreset(state, '   ');
+    expect(state.project.customPresets[0].name.length).toBeGreaterThan(0);
   });
 
   it('keeps Pattern N and duplicate suffixes stable across add and copy', () => {

@@ -2,10 +2,16 @@
 export const PATTERN_ROWS = 16;
 
 /** Version of the `.chippy.json` document. Unknown versions are rejected. */
-export const PROJECT_VERSION = 2;
+export const PROJECT_VERSION = 3;
 
-/** Legacy flat-document version still accepted on open and migrated to v2. */
+/** Flat multi-song project version still accepted on open and migrated to v3. */
+export const PROJECT_VERSION_V2 = 2;
+
+/** Legacy flat-document version still accepted on open and migrated to v3. */
 export const LEGACY_PROJECT_VERSION = 1;
+
+/** Musical role used to group presets in the instrument studio. */
+export type PresetRole = 'lead' | 'bass' | 'percussion' | 'pad' | 'fx';
 
 export type ChipId = 'gameboy' | 'vectrex' | 'c64' | 'atarist' | 'nes';
 
@@ -134,6 +140,20 @@ export interface SongBody {
 }
 
 /**
+ * User-saved instrument template stored on the project (not a global library).
+ * `chip` is recorded so multi-chip projects can filter later.
+ */
+export interface CustomInstrumentPreset {
+  id: string;
+  name: string;
+  chip: ChipId;
+  kind: InstrumentKind;
+  role: PresetRole;
+  /** Field overrides applied on top of a fresh instrument of `kind`. */
+  patch: Partial<Instrument>;
+}
+
+/**
  * Editable Chippy document: one chip, a shared instrument bank, and one or more songs.
  */
 export interface Project {
@@ -144,6 +164,8 @@ export interface Project {
   armedInstrumentId: string;
   songs: SongBody[];
   activeSongId: string;
+  /** Project-scoped reusable instrument templates. */
+  customPresets: CustomInstrumentPreset[];
 }
 
 /**

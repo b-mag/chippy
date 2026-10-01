@@ -32,53 +32,68 @@ describe('timing helpers', () => {
 });
 
 describe('soft NES helpers', () => {
-  it('covers envelope rise, silence, and decaying volume', () => {
-    expect(softNesChannelFrame({
-      midi: null,
-      active: true,
-      wave: 'pulse',
-      duty: 2,
+  it('covers envelope rise, silence, decaying volume, and pitch macro', () => {
+    const base = {
+      duty: 2 as const,
       volume: 12,
       envelopeDown: true,
       envelopePeriod: 1,
       noiseShort: false,
+      volumeMacro: null,
+      pitchMacro: null,
       gateAge: 1,
+    };
+    expect(softNesChannelFrame({
+      ...base,
+      midi: null,
+      active: true,
+      wave: 'pulse',
     }).wave).toBe('none');
     const rising = softNesChannelFrame({
+      ...base,
       midi: 60,
       active: true,
       wave: 'pulse',
       duty: 1,
       volume: 8,
       envelopeDown: false,
-      envelopePeriod: 1,
-      noiseShort: false,
       gateAge: 5,
     });
     expect(rising.amp).toBeGreaterThan(8 / 15);
     const decayed = softNesChannelFrame({
+      ...base,
       midi: 60,
       active: true,
       wave: 'pulse',
-      duty: 2,
       volume: 2,
-      envelopeDown: true,
-      envelopePeriod: 1,
-      noiseShort: false,
       gateAge: 40,
     });
     expect(decayed.wave).toBe('none');
     expect(softNesChannelFrame({
+      ...base,
       midi: 60,
       active: true,
       wave: 'triangle',
-      duty: 2,
       volume: 15,
-      envelopeDown: true,
       envelopePeriod: 0,
-      noiseShort: false,
-      gateAge: 1,
     }).wave).toBe('triangle');
+    const kicked = softNesChannelFrame({
+      ...base,
+      midi: 36,
+      active: true,
+      wave: 'triangle',
+      pitchMacro: [12, 8, 4, 0],
+      gateAge: 1,
+    });
+    const settled = softNesChannelFrame({
+      ...base,
+      midi: 36,
+      active: true,
+      wave: 'triangle',
+      pitchMacro: [12, 8, 4, 0],
+      gateAge: 4,
+    });
+    expect(kicked.hz).toBeGreaterThan(settled.hz);
   });
 });
 

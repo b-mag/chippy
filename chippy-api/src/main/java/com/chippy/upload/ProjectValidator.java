@@ -10,7 +10,7 @@ import java.util.Map;
 /**
  * Accepts a Chippy project only when every field is known, then writes it
  * back out so the browser never keeps the raw upload. Legacy v1 flat songs
- * are migrated to the v2 project shape.
+ * and v2 projects are migrated to the v3 project shape (customPresets).
  */
 public final class ProjectValidator {
 
@@ -34,13 +34,19 @@ public final class ProjectValidator {
                 assertOnlyKeys(raw, "version", "name", "chip", "tempo", "order", "patterns", "instruments", "armedInstrumentId");
                 ProjectDocumentV1 legacy = MAPPER.convertValue(raw, ProjectDocumentV1.class);
                 validateV1(legacy);
-                ProjectDocumentV2 migrated = migrateV1(legacy);
+                ProjectDocumentV3 migrated = migrateV1(legacy);
                 return MAPPER.writeValueAsBytes(migrated);
             }
             if (Integer.valueOf(2).equals(version) || Integer.valueOf(2).equals(asInt(version))) {
                 assertOnlyKeys(raw, "version", "name", "chip", "instruments", "armedInstrumentId", "songs", "activeSongId");
                 ProjectDocumentV2 document = MAPPER.convertValue(raw, ProjectDocumentV2.class);
                 validateV2(document);
+                return MAPPER.writeValueAsBytes(migrateV2(document));
+            }
+            if (Integer.valueOf(3).equals(version) || Integer.valueOf(3).equals(asInt(version))) {
+                assertOnlyKeys(raw, "version", "name", "chip", "instruments", "armedInstrumentId", "songs", "activeSongId", "customPresets");
+                ProjectDocumentV3 document = MAPPER.convertValue(raw, ProjectDocumentV3.class);
+                validateV3(document);
                 return MAPPER.writeValueAsBytes(document);
             }
             throw new UploadRejectedException("Unsupported project version.");
@@ -102,7 +108,22 @@ public final class ProjectValidator {
         }
     }
 
-    private static ProjectDocumentV2 migrateV1(ProjectDocumentV1 legacy) {
+    private static void validateV3(ProjectDocumentV3 document) {
+        validateChip(document.chip());
+        if (document.instruments() == null || document.instruments().isEmpty()) {
+            throw new UploadRejectedException("The project has no instruments.");
+        }
+        if (document.songs() == null || document.songs().isEmpty()) {
+            throw new UploadRejectedException("The project has no songs.");
+        }
+        for (SongBodyDocument song : document.songs()) {
+            if (song.patterns() == null || song.patterns().isEmpty()) {
+                throw new UploadRejectedException("The project has no patterns.");
+            }
+        }
+    }
+
+    private static ProjectDocumentV3 migrateV1(ProjectDocumentV1 legacy) {
         SongBodyDocument song = new SongBodyDocument(
                 "song-1",
                 legacy.name() == null || legacy.name().isBlank() ? "Song 1" : legacy.name(),
@@ -110,14 +131,28 @@ public final class ProjectValidator {
                 legacy.order(),
                 legacy.patterns()
         );
-        return new ProjectDocumentV2(
-                2,
+        return new ProjectDocumentV3(
+                3,
                 legacy.name(),
                 legacy.chip(),
                 legacy.instruments(),
                 legacy.armedInstrumentId(),
                 List.of(song),
-                "song-1"
+                "song-1",
+                List.of()
+        );
+    }
+
+    private static ProjectDocumentV3 migrateV2(ProjectDocumentV2 document) {
+        return new ProjectDocumentV3(
+                3,
+                document.name(),
+                document.chip(),
+                document.instruments(),
+                document.armedInstrumentId(),
+                document.songs(),
+                document.activeSongId(),
+                List.of()
         );
     }
 
@@ -153,6 +188,19 @@ public final class ProjectValidator {
             String armedInstrumentId,
             List<SongBodyDocument> songs,
             String activeSongId
+    ) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = false)
+    public record ProjectDocumentV3(
+            int version,
+            String name,
+            String chip,
+            List<Object> instruments,
+            String armedInstrumentId,
+            List<SongBodyDocument> songs,
+            String activeSongId,
+            List<Object> customPresets
     ) {
     }
 }

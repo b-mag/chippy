@@ -4,6 +4,7 @@ import {
   Component,
   computed,
   effect,
+  HostListener,
   inject,
   signal,
   viewChild,
@@ -21,14 +22,17 @@ import {
   formatNote,
   kindAllowedOnChannel,
   noteFromKey,
+  defaultRoleForKind,
+  groupPresetsForMenu,
   patternDisplayName,
-  presetsForChip,
   songForRender,
   type CellEffect,
   type ColumnId,
   type EffectCmd,
   type InstrumentKind,
   type InstrumentPreset,
+  type PresetMenuEntry,
+  type PresetRole,
   type Project,
 } from '@chippy/domain';
 import { PlaybackService, type LoopMode } from '../playback.service';
@@ -52,6 +56,7 @@ export class TrackerComponent {
   private readonly entitlement = inject(SupportEntitlementService);
   private readonly renameInput = viewChild<ElementRef<HTMLInputElement>>('renameInput');
   private readonly instrumentRenameInput = viewChild<ElementRef<HTMLInputElement>>('instrumentRenameInput');
+  private readonly openProjectInput = viewChild<ElementRef<HTMLInputElement>>('openProjectInput');
 
   readonly state = this.session.state;
   readonly playRow = this.playback.row;
@@ -148,8 +153,11 @@ export class TrackerComponent {
       (field) => field.kinds.includes(armed.kind) && (!field.channelId || field.channelId === channel?.id),
     );
   });
-  readonly presets = computed(() => presetsForChip(this.project().chip));
+  readonly presetGroups = computed(() =>
+    groupPresetsForMenu(this.project().chip, this.project().customPresets ?? []),
+  );
   readonly premiumUnlocked = computed(() => this.entitlement.canUsePremiumPresets());
+  readonly customPresetRoles: PresetRole[] = ['lead', 'bass', 'percussion', 'pad', 'fx'];
   readonly showSnip = computed(() => {
     const chip = this.project().chip;
     return chip === 'vectrex' || chip === 'atarist';
@@ -649,6 +657,21 @@ export class TrackerComponent {
     this.status.set('Project saved.');
   }
 
+  pickOpenProject(): void {
+    const input = this.openProjectInput()?.nativeElement;
+    if (!input) {
+      return;
+    }
+    input.value = '';
+    input.click();
+  }
+
+  onOpenProjectSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    this.open(input.files?.[0]);
+    input.value = '';
+  }
+
   open(file: File | undefined): void {
     if (!file) return;
     if (this.state().dirty) {
@@ -669,6 +692,18 @@ export class TrackerComponent {
       },
       error: () => this.status.set('That file was rejected.'),
     });
+  }
+
+  toggleExport(event: Event): void {
+    event.stopPropagation();
+    this.exportOpen.update((open) => !open);
+  }
+
+  @HostListener('document:click')
+  closeExportMenu(): void {
+    if (this.exportOpen()) {
+      this.exportOpen.set(false);
+    }
   }
 
   async exportFile(kind: 'wav' | 'ym' | 'vgm' | 'aky'): Promise<void> {
@@ -765,15 +800,48 @@ export class TrackerComponent {
     );
   }
 
-  addPreset(preset: InstrumentPreset): void {
-    if (preset.premium && !this.premiumUnlocked()) {
+  addPresetEntry(entry: PresetMenuEntry): void {
+    if (entry.custom) {
+      this.session.addFromCustomPreset(entry.id);
+    } else if (entry.premium && !this.premiumUnlocked()) {
       this.presetStatus.set('Premium preset — unlock via Support Chippy (or set presets.unlockAll in config).');
       return;
+    } else {
+      this.session.addFromPreset(entry.source as InstrumentPreset);
     }
-    this.session.addFromPreset(preset);
     this.presetsOpen.set(false);
-    this.presetStatus.set(`Added ${preset.name}.`);
+    this.presetStatus.set(`Added ${entry.name}.`);
     this.auditionMidi(this.lastAuditionMidi());
+  }
+
+  saveArmedAsCustom(): void {
+    const name = window.prompt('Custom preset name', this.armed().name);
+    if (name === null) {
+      return;
+    }
+    const defaultRole = defaultRoleForKind(this.armed().kind);
+    const roleRaw = window.prompt(
+      `Role (${this.customPresetRoles.join(', ')})`,
+      defaultRole,
+    );
+    if (roleRaw === null) {
+      return;
+    }
+    const role = this.customPresetRoles.includes(roleRaw as PresetRole)
+      ? (roleRaw as PresetRole)
+      : defaultRole;
+    this.session.saveCustomPreset(name, role);
+    this.presetsOpen.set(true);
+    this.presetStatus.set(`Saved custom preset “${name.trim() || this.armed().name}”.`);
+  }
+
+  removeCustomEntry(entry: PresetMenuEntry, event: Event): void {
+    event.stopPropagation();
+    if (!entry.custom) {
+      return;
+    }
+    this.session.removeCustomPreset(entry.id);
+    this.presetStatus.set(`Removed custom preset “${entry.name}”.`);
   }
 
   deleteArmed(): void {

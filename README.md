@@ -14,7 +14,7 @@ A web tracker for writing Game Boy, Vectrex, C64, Atari ST, and NES chiptunes. K
 - A project holds one chip, a shared instrument bank, and one or more songs.
 - Game Boy (PU1/PU2/WAV/NOI), Vectrex (three tone channels), C64 (three SID voices), Atari ST (YM2149 tones), and NES (PU1/PU2/TRI/NOI).
 - Pattern grid columns: note, instrument, volume, and a shared FX column (`A` volume slide down, `U` volume slide up, `D` note delay, `R` retrigger, `C` timed cut, `P` pitch slide).
-- Instrument studio: rename/type/delete, pitch audition, chip-specific hardware controls, free and premium presets (`presets.unlockAll` in config unlocks premium for local/dev).
+- Instrument studio: rename/type/delete, pitch audition, chip-specific hardware controls, free and premium presets grouped by role then kind (`presets.unlockAll` in config unlocks premium for local/dev). Save project-scoped custom presets from the armed instrument.
 - Changing chip starts a new blank project after confirm. Opening a project warns when the session is dirty.
 - The keyboard plays a note as you write it. Undo, mute, and solo are on that screen.
 - Vaporwave, dark, and plain paint, chosen from a Paint dropdown (defaults to vaporwave).

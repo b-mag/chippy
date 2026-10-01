@@ -24,6 +24,14 @@ class ValidatorsTest {
         String noInstruments = "{\"version\":1,\"name\":\"A\",\"chip\":\"gameboy\",\"tempo\":120,\"order\":[\"pat-1\"],\"patterns\":[{\"id\":\"pat-1\"}],\"instruments\":[],\"armedInstrumentId\":\"ins-1\"}";
         assertThrows(UploadRejectedException.class, () -> ProjectValidator.reparse(noInstruments.getBytes(StandardCharsets.UTF_8)));
         assertThrows(UploadRejectedException.class, () -> ProjectValidator.reparse("not-json".getBytes(StandardCharsets.UTF_8)));
+        String v3 = "{\"version\":3,\"name\":\"A\",\"chip\":\"nes\",\"instruments\":[{\"id\":\"ins-1\"}],\"armedInstrumentId\":\"ins-1\",\"songs\":[{\"id\":\"song-1\",\"name\":\"Song 1\",\"tempo\":120,\"order\":[\"pat-1\"],\"patterns\":[{\"id\":\"pat-1\"}]}],\"activeSongId\":\"song-1\",\"customPresets\":[]}";
+        byte[] rewritten = ProjectValidator.reparse(v3.getBytes(StandardCharsets.UTF_8));
+        assertTrue(new String(rewritten, StandardCharsets.UTF_8).contains("\"version\":3"));
+        String v2 = v3.replace("\"version\":3", "\"version\":2").replace(",\"customPresets\":[]", "");
+        byte[] migrated = ProjectValidator.reparse(v2.getBytes(StandardCharsets.UTF_8));
+        String migratedText = new String(migrated, StandardCharsets.UTF_8);
+        assertTrue(migratedText.contains("\"version\":3"));
+        assertTrue(migratedText.contains("customPresets"));
     }
 
     @Test

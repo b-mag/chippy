@@ -2,6 +2,7 @@ import { Injectable, signal } from '@angular/core';
 import {
   activeSongBody,
   addInstrument,
+  addInstrumentFromCustomPreset,
   addInstrumentFromPreset,
   addPattern,
   addRandomPattern,
@@ -22,11 +23,13 @@ import {
   newProjectForChip,
   newSession,
   redo,
+  removeCustomPreset,
   removeOrderEntry,
   removeSong,
   renameInstrument,
   renamePattern,
   reorderOrder,
+  saveCustomPreset,
   selectOrder,
   selectSong,
   setName,
@@ -45,6 +48,7 @@ import {
   type Instrument,
   type InstrumentKind,
   type InstrumentPreset,
+  type PresetRole,
   type Project,
   type SessionState,
   type Song,
@@ -174,6 +178,18 @@ export class SessionService {
 
   addFromPreset(preset: InstrumentPreset): void {
     this.state.update((state) => addInstrumentFromPreset(state, preset));
+  }
+
+  addFromCustomPreset(id: string): void {
+    this.state.update((state) => addInstrumentFromCustomPreset(state, id));
+  }
+
+  saveCustomPreset(name: string, role?: PresetRole): void {
+    this.state.update((state) => saveCustomPreset(state, name, role));
+  }
+
+  removeCustomPreset(id: string): void {
+    this.state.update((state) => removeCustomPreset(state, id));
   }
 
   tempo(value: number): void {

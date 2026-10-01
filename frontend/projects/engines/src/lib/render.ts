@@ -432,6 +432,8 @@ function nesParamsFromVoice(song: Song, voice: Voice, wave: SoftNesChannelParams
     envelopeDown: instrument?.envelopeDown ?? true,
     envelopePeriod: instrument?.envelopePeriod ?? 3,
     noiseShort: instrument?.noiseShort ?? false,
+    volumeMacro: instrument?.volumeMacro ?? null,
+    pitchMacro: instrument?.pitchMacro ?? null,
     gateAge: voice.gateAge,
   };
 }

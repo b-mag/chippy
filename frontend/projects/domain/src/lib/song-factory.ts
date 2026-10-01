@@ -47,6 +47,7 @@ export function newProject(chip: ChipId, name = 'Untitled'): Project {
     armedInstrumentId: instrument.id,
     songs: [song],
     activeSongId: song.id,
+    customPresets: [],
   };
 }
 

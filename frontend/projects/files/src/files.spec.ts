@@ -65,32 +65,55 @@ describe('project file', () => {
       armedInstrumentId: project.armedInstrumentId,
     };
     const migrated = parseProject(JSON.stringify(legacy));
-    expect(migrated.version).toBe(2);
+    expect(migrated.version).toBe(3);
+    expect(migrated.customPresets).toEqual([]);
     expect(migrated.songs[0].patterns[0].name).toBe('Pattern 1');
-    const v2 = parseProject(text);
+    const v3 = parseProject(text);
+    expect(v3.version).toBe(3);
+    expect(v3.customPresets).toEqual([]);
+    const asV2 = JSON.parse(text);
+    asV2.version = 2;
+    delete asV2.customPresets;
+    const fromV2 = parseProject(JSON.stringify(asV2));
+    expect(fromV2.version).toBe(3);
+    expect(fromV2.customPresets).toEqual([]);
     expect(parseProject(JSON.stringify({
-      ...v2,
+      ...v3,
       songs: [{ id: 'song-1', name: 'A', tempo: 100, order: ['pat-1'], patterns: [{ id: 'pat-1', rows: project.songs[0].patterns[0].rows }] }],
       activeSongId: 'missing',
     })).activeSongId).toBe('song-1');
     expect(() => parseProject(JSON.stringify({
-      version: 2,
+      version: 3,
       name: 'X',
       chip: 'gameboy',
       instruments: project.instruments,
       armedInstrumentId: project.armedInstrumentId,
       songs: [{ id: 'song-1', name: 'A', tempo: 120, order: [], patterns: [] }],
       activeSongId: 'song-1',
+      customPresets: [],
     }))).toThrow(/order|patterns/);
     expect(() => parseProject(JSON.stringify({
-      version: 2,
+      version: 3,
       name: 'X',
       chip: 'gameboy',
       instruments: [],
       armedInstrumentId: 'ins-1',
-      songs: v2.songs,
-      activeSongId: v2.activeSongId,
+      songs: v3.songs,
+      activeSongId: v3.activeSongId,
+      customPresets: [],
     }))).toThrow(/instruments/);
+    const withCustom = {
+      ...v3,
+      customPresets: [{
+        id: 'custom-1',
+        name: 'My lead',
+        chip: 'gameboy',
+        kind: 'pulse',
+        role: 'lead',
+        patch: { duty: 1, envelopeStart: 10 },
+      }],
+    };
+    expect(parseProject(JSON.stringify(withCustom)).customPresets[0].name).toBe('My lead');
   });
 });
 

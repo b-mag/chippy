@@ -1,5 +1,10 @@
 import { baseInstrument, chipDefinition, instrumentForChannel, kindAllowedOnChannel } from './chips';
-import { instrumentFromPreset, type InstrumentPreset } from './presets';
+import {
+  defaultRoleForKind,
+  instrumentFromPreset,
+  instrumentToPresetPatch,
+  type InstrumentPreset,
+} from './presets';
 import { ensureChannelInstruments, fillPatternRandom, randomProject } from './random-song';
 import {
   activeSongBody,
@@ -12,14 +17,17 @@ import {
 } from './song-factory';
 import {
   PATTERN_ROWS,
+  PROJECT_VERSION,
   type Cell,
   type CellEffect,
   type ChipId,
   type ColumnId,
   type Cursor,
+  type CustomInstrumentPreset,
   type Instrument,
   type InstrumentKind,
   type Pattern,
+  type PresetRole,
   type Project,
   type Song,
   type SongBody,
@@ -654,6 +662,65 @@ export function addInstrumentFromPreset(state: SessionState, preset: InstrumentP
   return commit(state, project);
 }
 
+function nextCustomPresetId(project: Project): string {
+  let index = (project.customPresets?.length ?? 0) + 1;
+  const used = new Set((project.customPresets ?? []).map((item) => item.id));
+  while (used.has(`custom-${index}`)) {
+    index += 1;
+  }
+  return `custom-${index}`;
+}
+
+/** Save the armed instrument as a project-scoped custom preset. */
+export function saveCustomPreset(
+  state: SessionState,
+  name: string,
+  role: PresetRole = defaultRoleForKind(armedInstrument(state.project).kind),
+): SessionState {
+  const armed = armedInstrument(state.project);
+  const trimmed = name.trim().slice(0, 40) || armed.name;
+  const project = cloneProject(state.project);
+  if (!project.customPresets) {
+    project.customPresets = [];
+  }
+  const custom: CustomInstrumentPreset = {
+    id: nextCustomPresetId(project),
+    name: trimmed,
+    chip: project.chip,
+    kind: armed.kind,
+    role,
+    patch: instrumentToPresetPatch(armed),
+  };
+  project.customPresets = [...project.customPresets, custom];
+  return commit(state, project);
+}
+
+export function removeCustomPreset(state: SessionState, id: string): SessionState {
+  const project = cloneProject(state.project);
+  const next = (project.customPresets ?? []).filter((item) => item.id !== id);
+  if (next.length === (project.customPresets ?? []).length) {
+    return state;
+  }
+  project.customPresets = next;
+  return commit(state, project);
+}
+
+export function addInstrumentFromCustomPreset(state: SessionState, id: string): SessionState {
+  const custom = (state.project.customPresets ?? []).find((item) => item.id === id);
+  if (!custom || custom.chip !== state.project.chip) {
+    return state;
+  }
+  return addInstrumentFromPreset(state, {
+    id: custom.id,
+    name: custom.name,
+    chip: custom.chip,
+    kind: custom.kind,
+    role: custom.role,
+    premium: false,
+    patch: custom.patch,
+  });
+}
+
 export function setTempo(state: SessionState, tempo: number): SessionState {
   return mutateActiveSong(state, (body) => ({
     ...body,
@@ -750,7 +817,12 @@ export function loadProject(state: SessionState, project: Project): SessionState
     })),
   }));
   return {
-    project: { ...project, songs },
+    project: {
+      ...project,
+      version: PROJECT_VERSION,
+      songs,
+      customPresets: Array.isArray(project.customPresets) ? project.customPresets : [],
+    },
     cursor: { orderIndex: 0, row: 0, channel: 0, column: 'note' },
     octave: state.octave,
     past: [],
@@ -774,13 +846,14 @@ export function loadSong(state: SessionState, song: Song | Project): SessionStat
     patterns: flat.patterns,
   };
   return loadProject(state, {
-    version: 2,
+    version: PROJECT_VERSION,
     name: flat.name,
     chip: flat.chip,
     instruments: flat.instruments,
     armedInstrumentId: flat.armedInstrumentId,
     songs: [body],
     activeSongId: body.id,
+    customPresets: [],
   });
 }
 

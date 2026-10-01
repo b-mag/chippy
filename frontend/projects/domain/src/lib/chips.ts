@@ -348,6 +348,8 @@ const nes: ChipDefinition = {
     { key: 'envelopeDown', label: 'Envelope falls', control: 'toggle', kinds: ['pulse', 'noise'] },
     { key: 'envelopePeriod', label: 'Envelope period', control: 'knob', min: 0, max: 7, kinds: ['pulse', 'noise'] },
     { key: 'noiseShort', label: 'Short noise', control: 'toggle', kinds: ['noise'] },
+    { key: 'pitchMacro', label: 'Pitch macro', control: 'macro', min: -24, max: 24, kinds: ['pulse', 'triangle', 'noise'] },
+    { key: 'volumeMacro', label: 'Volume macro', control: 'macro', min: 0, max: 15, kinds: ['pulse', 'noise'] },
   ],
   createDefaultInstrument() {
     return nesInstrument('pulse');
