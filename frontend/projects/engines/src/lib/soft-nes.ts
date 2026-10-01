@@ -73,7 +73,8 @@ export function softNesChannelFrame(params: SoftNesChannelParams): NesChannelFra
   }
   return {
     hz: midiToHz(params.midi),
-    amp: params.wave === 'triangle' ? 0.35 : amp,
+    // Web Audio / soft triangle is quieter than square at the same linear amp.
+    amp: params.wave === 'triangle' ? Math.max(0.7, amp) : amp,
     wave: params.wave,
     duty: params.duty,
     noiseShort: false,

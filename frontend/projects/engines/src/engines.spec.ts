@@ -248,8 +248,8 @@ describe('renderSong', () => {
       envelopeStart: 12,
     });
     state = enterNote(state, 60);
+    // Triangle channel should auto-create a triangle instrument on note entry.
     state = { ...state, cursor: { ...state.cursor, channel: 2, row: 0 } };
-    state = addInstrument(state, 'triangle');
     state = enterNote(state, 48);
     state = { ...state, cursor: { ...state.cursor, channel: 3, row: 0 } };
     state = addInstrument(state, 'noise');
@@ -268,6 +268,8 @@ describe('renderSong', () => {
     expect(rendered.frames[0].channels[0].wave).toBe('pulse');
     expect(rendered.frames[0].channels[0].hz).toBeGreaterThan(0);
     expect(rendered.frames[0].channels[2].wave).toBe('triangle');
+    expect(rendered.frames[0].channels[2].hz).toBeGreaterThan(0);
+    expect(rendered.frames[0].channels[2].amp).toBeGreaterThanOrEqual(0.7);
     expect(rendered.frames[0].channels[3].wave).toBe('noise');
     expect(rendered.frames[0].channels[3].noiseShort).toBe(true);
   });

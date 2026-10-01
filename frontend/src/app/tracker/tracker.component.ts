@@ -754,6 +754,9 @@ export class TrackerComponent {
       await this.save();
     }
     this.playback.stop();
+    this.muted.set(new Set());
+    this.solo.set(new Set());
+    this.playback.setMuteSolo(new Set(), new Set());
     this.session.newProjectForChip(id);
     this.status.set(
       saveFirst

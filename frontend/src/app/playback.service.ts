@@ -423,11 +423,12 @@ export class PlaybackService {
         if (this.noiseGains[channel]) {
           this.noiseGains[channel].gain.value = 0;
         }
-        this.gains[channel].gain.value = on ? voice.amp * 0.12 : 0;
         if (on && this.oscillators[channel]) {
           this.oscillators[channel].type = voice.wave === 'triangle' ? 'triangle' : 'square';
           this.oscillators[channel].frequency.value = voice.hz;
         }
+        const gainScale = voice.wave === 'triangle' ? 0.2 : 0.12;
+        this.gains[channel].gain.value = on ? voice.amp * gainScale : 0;
       }
       return;
     }

@@ -148,7 +148,8 @@ export function renderPcm(rendered: RenderedSong): Int16Array {
             continue;
           }
           if (voice.wave === 'triangle') {
-            mixed += triangle(phases[channel]) * voice.amp;
+            // Soft triangle helper peaks at ±0.25; scale up so TRI matches pulse loudness.
+            mixed += triangle(phases[channel]) * voice.amp * 2.2;
           } else {
             mixed += square(phases[channel], nesDutyFraction(voice.duty)) * voice.amp * 0.7;
           }
