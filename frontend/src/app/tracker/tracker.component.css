@@ -445,6 +445,11 @@
   max-height: min(44rem, calc(100vh - 32px));
 }
 
+.instrument-modal--expanded {
+  width: min(72rem, calc(100vw - 24px));
+  max-height: min(90vh, calc(100vh - 24px));
+}
+
 .instrument-modal-body {
   display: flex;
   flex-direction: column;
@@ -454,12 +459,51 @@
   padding-right: 4px;
 }
 
+.instrument-modal--expanded.instrument-modal--fm .instrument-modal-body {
+  display: grid;
+  grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr);
+  gap: 12px 18px;
+  align-content: start;
+}
+
+.instrument-modal--expanded.instrument-modal--fm .instrument-identity,
+.instrument-modal--expanded.instrument-modal--fm .audition-strip,
+.instrument-modal--expanded.instrument-modal--fm .audition-hint {
+  grid-column: 1 / -1;
+}
+
+.instrument-modal--expanded.instrument-modal--fm .fm-operators {
+  border-top: none;
+  padding-top: 0;
+  min-width: 0;
+}
+
+.instrument-modal--expanded .fm-grid-head,
+.instrument-modal--expanded .fm-grid-row {
+  grid-template-columns: 5.5rem repeat(10, minmax(3.75rem, 1fr));
+  gap: 6px;
+}
+
+.instrument-modal--expanded .fm-op-input {
+  font-size: 0.85rem;
+  padding-inline: 4px;
+}
+
+.instrument-modal--expanded .fm-grid-head span {
+  font-size: 0.75rem;
+}
+
 .instrument-modal .studio-hardware {
   max-height: none;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
   gap: 8px 18px;
   align-items: center;
+}
+
+.instrument-modal--expanded.instrument-modal--fm .studio-hardware {
+  grid-template-columns: 1fr;
+  align-content: start;
 }
 
 .instrument-modal .studio-hardware h3,

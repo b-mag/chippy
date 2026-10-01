@@ -379,5 +379,9 @@ export class RadioPlayerService {
     }
     this.source = null;
     this.analyser = null;
+    if (this.context) {
+      void this.context.close();
+      this.context = null;
+    }
   }
 }

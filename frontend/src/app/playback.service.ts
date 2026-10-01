@@ -29,6 +29,12 @@ export interface PlaybackTick {
   row: number;
 }
 
+/** Note + cut span for instrument audition (rows 0 and 4). */
+const AUDITION_ROWS = 5;
+
+/** Short looped LFSR noise; character matches a full-second buffer when looped. */
+const NOISE_BUFFER_SAMPLES = 4096;
+
 /**
  * Oscillators live on the audio thread. Angular only hears about the
  * current pattern row, once per row, through `row` / `tick`.
@@ -46,6 +52,7 @@ export class PlaybackService {
   private oscillators: OscillatorNode[] = [];
   private noiseNodes: AudioBufferSourceNode[] = [];
   private noiseGains: GainNode[] = [];
+  private cachedNoiseBuffer: AudioBuffer | null = null;
   private waveGain: GainNode | null = null;
   private waveSource: AudioBufferSourceNode | null = null;
   private waveSampleKey = '';
@@ -68,6 +75,29 @@ export class PlaybackService {
   private fmGain: GainNode | null = null;
   private fmSources: AudioBufferSourceNode[] = [];
   private fmNextTime = 0;
+  private keepAliveOsc: OscillatorNode | null = null;
+  private keepAliveGain: GainNode | null = null;
+  private unlockArmed = false;
+  private lifecycleWired = false;
+  private resumeInFlight: Promise<AudioContext> | null = null;
+  /** Bumped on stop so in-flight async play/audition aborts after await. */
+  private playbackGeneration = 0;
+
+  /**
+   * Install capture listeners so the first user gesture creates and resumes
+   * the AudioContext before play/audition need it. Safe to call multiple times.
+   */
+  armUnlock(): void {
+    if (this.unlockArmed || typeof document === 'undefined') {
+      return;
+    }
+    this.unlockArmed = true;
+    const unlock = () => {
+      void this.ensure();
+    };
+    document.addEventListener('pointerdown', unlock, { capture: true });
+    document.addEventListener('keydown', unlock, { capture: true });
+  }
 
   /**
    * Play a short engine-rendered one-shot of the armed instrument at `midi`.
@@ -77,10 +107,18 @@ export class PlaybackService {
     if (this.playing()) {
       return;
     }
+    void this.auditionAsync(song, midi);
+  }
+
+  private async auditionAsync(song: Song, midi: number): Promise<void> {
+    if (this.playing()) {
+      return;
+    }
+    const generation = this.playbackGeneration;
     const instrument = song.instruments.find((item) => item.id === song.armedInstrumentId) ?? song.instruments[0];
     const channel = auditionChannelIndex(song.chip, instrument.kind);
     const channelCount = chipDefinition(song.chip).channels.length;
-    const rows = Array.from({ length: PATTERN_ROWS }, () =>
+    const rows = Array.from({ length: AUDITION_ROWS }, () =>
       Array.from({ length: channelCount }, () => emptyCell()),
     );
     rows[0][channel] = {
@@ -101,10 +139,13 @@ export class PlaybackService {
       armedInstrumentId: song.armedInstrumentId,
     };
     const rendered = renderSong(preview);
-    const context = this.ensure();
+    const context = await this.ensure();
+    if (generation !== this.playbackGeneration || this.playing()) {
+      return;
+    }
     this.prepareVoices(context, channelCount);
     window.clearInterval(this.auditionTimer);
-    const framesToPlay = Math.min(rendered.frames.length, rendered.framesPerRow * 5);
+    const framesToPlay = Math.min(rendered.frames.length, rendered.framesPerRow * AUDITION_ROWS);
     if (isFmRender(rendered)) {
       this.stopFmSources();
       this.fmState = createFmSynthState(channelCount, context.sampleRate);
@@ -129,6 +170,7 @@ export class PlaybackService {
   }
 
   stop(): void {
+    this.playbackGeneration += 1;
     window.clearInterval(this.timer);
     window.clearInterval(this.auditionTimer);
     this.timer = 0;
@@ -160,9 +202,24 @@ export class PlaybackService {
   }
 
   play(song: Song, orderIndex: number, fromRow: number, loop: LoopMode, muted: Set<number>, solo: Set<number>): void {
+    void this.playAsync(song, orderIndex, fromRow, loop, muted, solo);
+  }
+
+  private async playAsync(
+    song: Song,
+    orderIndex: number,
+    fromRow: number,
+    loop: LoopMode,
+    muted: Set<number>,
+    solo: Set<number>,
+  ): Promise<void> {
     this.stop();
+    const generation = this.playbackGeneration;
     this.rendered = renderSong(song);
-    const context = this.ensure();
+    const context = await this.ensure();
+    if (generation !== this.playbackGeneration) {
+      return;
+    }
     const channelCount = chipDefinition(song.chip).channels.length;
     this.prepareVoices(context, channelCount);
     this.fmState = isFmChipId(song.chip)
@@ -198,12 +255,12 @@ export class PlaybackService {
         : this.absoluteRow % this.songRows;
       const frameIndex = Math.min(rendered.frames.length - 1, frameRow * rendered.framesPerRow);
       if (isFmRender(rendered)) {
-        const muted = this.mutedChannels;
-        const solo = this.soloChannels;
+        const mutedChannels = this.mutedChannels;
+        const soloChannels = this.soloChannels;
         this.scheduleFm(
           rendered.frames.slice(frameIndex, frameIndex + rendered.framesPerRow),
           rendered.frameRate,
-          (channel) => (solo.size > 0 ? solo.has(channel) : !muted.has(channel)),
+          (channel) => (soloChannels.size > 0 ? soloChannels.has(channel) : !mutedChannels.has(channel)),
         );
       } else {
         this.applyFrame(rendered.chip, rendered.frames[frameIndex], this.mutedChannels, this.soloChannels);
@@ -253,10 +310,10 @@ export class PlaybackService {
    */
   private scheduleFm(frames: FmFrame[], frameRate: number, audible: (channel: number) => boolean): void {
     const state = this.fmState;
-    if (!state || frames.length === 0) {
+    const context = this.context;
+    if (!state || !context || frames.length === 0) {
       return;
     }
-    const context = this.ensure();
     const samplesPerFrame = Math.round(context.sampleRate / frameRate);
     const buffer = context.createBuffer(1, frames.length * samplesPerFrame, context.sampleRate);
     synthesizeFmSamples(state, frames, samplesPerFrame, buffer.getChannelData(0), audible);
@@ -274,18 +331,77 @@ export class PlaybackService {
     };
   }
 
-  private ensure(): AudioContext {
+  private async ensure(): Promise<AudioContext> {
+    if (this.resumeInFlight) {
+      return this.resumeInFlight;
+    }
+    this.resumeInFlight = this.ensureImpl();
+    try {
+      return await this.resumeInFlight;
+    } finally {
+      this.resumeInFlight = null;
+    }
+  }
+
+  private async ensureImpl(): Promise<AudioContext> {
     if (!this.context) {
-      this.context = new AudioContext();
+      this.context = new AudioContext({ latencyHint: 'interactive' });
+      this.wireLifecycle(this.context);
     }
-    if (this.context.state === 'suspended') {
-      void this.context.resume();
+    const context = this.context;
+    if (context.state === 'suspended' || (context.state as string) === 'interrupted') {
+      await context.resume();
     }
-    return this.context;
+    this.startKeepAlive(context);
+    return context;
+  }
+
+  private wireLifecycle(context: AudioContext): void {
+    if (this.lifecycleWired || typeof document === 'undefined') {
+      return;
+    }
+    this.lifecycleWired = true;
+    context.addEventListener('statechange', () => {
+      if (context.state === 'running') {
+        this.startKeepAlive(context);
+      }
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible' || !this.context) {
+        return;
+      }
+      if (this.context.state === 'suspended' || (this.context.state as string) === 'interrupted') {
+        void this.ensure();
+      }
+    });
+  }
+
+  /** Zero-gain oscillator keeps the audio device open while the tab is active. */
+  private startKeepAlive(context: AudioContext): void {
+    if (this.keepAliveOsc || context.state !== 'running') {
+      return;
+    }
+    const gain = context.createGain();
+    gain.gain.value = 0;
+    gain.connect(context.destination);
+    const osc = context.createOscillator();
+    osc.frequency.value = 20;
+    osc.connect(gain);
+    try {
+      osc.start();
+    } catch {
+      gain.disconnect();
+      return;
+    }
+    this.keepAliveGain = gain;
+    this.keepAliveOsc = osc;
   }
 
   private noiseBuffer(context: AudioContext): AudioBuffer {
-    const length = context.sampleRate;
+    if (this.cachedNoiseBuffer && this.cachedNoiseBuffer.sampleRate === context.sampleRate) {
+      return this.cachedNoiseBuffer;
+    }
+    const length = NOISE_BUFFER_SAMPLES;
     const buffer = context.createBuffer(1, length, context.sampleRate);
     const data = buffer.getChannelData(0);
     let lfsr = 1;
@@ -293,6 +409,7 @@ export class PlaybackService {
       lfsr = (lfsr >> 1) | (((lfsr ^ (lfsr >> 1)) & 1) << 14);
       data[index] = lfsr & 1 ? 0.25 : -0.25;
     }
+    this.cachedNoiseBuffer = buffer;
     return buffer;
   }
 
@@ -350,7 +467,10 @@ export class PlaybackService {
   }
 
   private setWaveVoice(samples: number[], hz: number, level: number): void {
-    const context = this.ensure();
+    const context = this.context;
+    if (!context) {
+      return;
+    }
     this.ensureWaveVoice(context);
     const gain = this.waveGain;
     if (!gain) {
@@ -560,8 +680,16 @@ export class PlaybackService {
   }
 
   playFrames(frames: AyFrame[], frameRate: number, start: number, end: number): void {
+    void this.playFramesAsync(frames, frameRate, start, end);
+  }
+
+  private async playFramesAsync(frames: AyFrame[], frameRate: number, start: number, end: number): Promise<void> {
     this.stop();
-    const context = this.ensure();
+    const generation = this.playbackGeneration;
+    const context = await this.ensure();
+    if (generation !== this.playbackGeneration) {
+      return;
+    }
     this.prepareVoices(context, 3);
     let index = start;
     const last = Math.min(end, frames.length - 1);

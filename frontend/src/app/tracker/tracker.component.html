@@ -210,6 +210,8 @@
       <div
         #instrumentDialog
         class="preset-modal instrument-modal"
+        [class.instrument-modal--expanded]="instrumentModalExpanded()"
+        [class.instrument-modal--fm]="showFmOperators()"
         role="dialog"
         aria-modal="true"
         aria-label="Edit instrument"

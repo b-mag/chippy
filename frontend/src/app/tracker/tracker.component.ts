@@ -182,6 +182,10 @@ export class TrackerComponent {
     );
   });
   readonly showFmOperators = computed(() => this.armed().kind === 'fm');
+  /** Wider dialog for FM operator grids and dense hardware panels (SID, AY macros, etc.). */
+  readonly instrumentModalExpanded = computed(
+    () => this.showFmOperators() || this.hardwareFields().length >= 10,
+  );
   readonly operatorFields = FM_OPERATOR_FIELDS;
   /** Operators 1-4 with the role the current algorithm gives them. */
   readonly fmOperators = computed(() => {
@@ -248,6 +252,7 @@ export class TrackerComponent {
   });
 
   constructor() {
+    this.playback.armUnlock();
     effect(() => {
       const tick = this.playback.tick();
       if (!tick || !this.playback.playing()) {
