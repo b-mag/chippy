@@ -14,21 +14,34 @@ import { RouterLink } from '@angular/router';
 import {
   activeSongBody,
   armedInstrument,
+  channelIsPlaceholder,
   chipDefinition,
   chipIds,
   chipLabel,
   findInstrumentIdByNumberLabel,
+  fmAlgorithmRouting,
+  fmFieldValue,
   formatEffect,
   formatNote,
+  isChipId,
+  isFmChip,
+  isFmPatchFieldKey,
   kindAllowedOnChannel,
+  mergeFmPatch,
   noteFromKey,
+  patchFmField,
+  patchFmOperator,
   defaultRoleForKind,
   groupPresetsForMenu,
   patternDisplayName,
   songForRender,
+  FM_OPERATOR_FIELDS,
   type CellEffect,
+  type ChipId,
   type ColumnId,
   type EffectCmd,
+  type FmOperator,
+  type Instrument,
   type InstrumentKind,
   type InstrumentPreset,
   type PresetMenuEntry,
@@ -54,7 +67,7 @@ export class TrackerComponent {
   private readonly http = inject(HttpClient);
   private readonly entitlement = inject(SupportEntitlementService);
   private readonly renameInput = viewChild<ElementRef<HTMLInputElement>>('renameInput');
-  private readonly instrumentRenameInput = viewChild<ElementRef<HTMLInputElement>>('instrumentRenameInput');
+  private readonly instrumentDialog = viewChild<ElementRef<HTMLElement>>('instrumentDialog');
   private readonly openProjectInput = viewChild<ElementRef<HTMLInputElement>>('openProjectInput');
   private readonly importInstrumentInput = viewChild<ElementRef<HTMLInputElement>>('importInstrumentInput');
   private readonly presetSearchInput = viewChild<ElementRef<HTMLInputElement>>('presetSearchInput');
@@ -74,13 +87,12 @@ export class TrackerComponent {
   readonly solo = signal<ReadonlySet<number>>(new Set());
   readonly exportOpen = signal(false);
   readonly presetsOpen = signal(false);
+  readonly instrumentEditorOpen = signal(false);
   readonly presetSearch = signal('');
   /** Bumps when a chip switch is cancelled so the select rebinds to the current chip. */
   readonly chipSelectEpoch = signal(0);
   readonly renamingId = signal<string | null>(null);
   readonly renameDraft = signal('');
-  readonly renamingInstrumentId = signal<string | null>(null);
-  readonly instrumentRenameDraft = signal('');
   readonly dragFrom = signal<number | null>(null);
   readonly dropIndex = signal<number | null>(null);
   readonly studioFocused = signal(false);
@@ -111,6 +123,7 @@ export class TrackerComponent {
         return {
           id: channel.id,
           index: channelIndex,
+          placeholder: channel.placeholder === true,
           cells: this.columns.map((column) => ({
             column,
             text: this.label(column, cell),
@@ -141,19 +154,48 @@ export class TrackerComponent {
   });
   readonly armed = computed(() => armedInstrument(this.project()));
   readonly chips = chipIds();
-  readonly kindOptions = computed(() => {
+  /**
+   * Channel the editor describes. A placeholder column drives nothing, so the
+   * editor falls back to the whole chip instead of showing an empty panel.
+   */
+  readonly editorChannel = computed(() => {
     const definition = this.chip();
     const channel = definition.channels[this.state().cursor.channel];
-    const allowed = channel ? definition.kindsForChannel(channel.id) : definition.kinds;
+    if (!channel || channel.placeholder) {
+      return definition.channels.find((item) => !item.placeholder) ?? null;
+    }
+    return channel;
+  });
+  readonly kindOptions = computed(() => {
+    const definition = this.chip();
+    const channel = this.editorChannel();
+    const forChannel = channel ? definition.kindsForChannel(channel.id) : [];
+    const allowed = forChannel.length > 0 ? forChannel : definition.kinds;
     const current = this.armed().kind;
     return allowed.includes(current) ? allowed : [current, ...allowed];
   });
   readonly hardwareFields = computed(() => {
     const armed = this.armed();
-    const channel = this.chip().channels[this.state().cursor.channel];
+    const channel = this.editorChannel();
     return this.chip().fields.filter(
       (field) => field.kinds.includes(armed.kind) && (!field.channelId || field.channelId === channel?.id),
     );
+  });
+  readonly showFmOperators = computed(() => this.armed().kind === 'fm');
+  readonly operatorFields = FM_OPERATOR_FIELDS;
+  /** Operators 1-4 with the role the current algorithm gives them. */
+  readonly fmOperators = computed(() => {
+    const patch = mergeFmPatch(this.armed().fm);
+    const routing = fmAlgorithmRouting(patch.algorithm);
+    return patch.operators.map((operator, index) => ({
+      index,
+      label: `OP${index + 1}`,
+      carrier: routing.carriers.includes(index),
+      modulates: routing.modulators
+        .map((sources, target) => (sources.includes(index) ? `OP${target + 1}` : null))
+        .filter((item): item is string => item !== null),
+      values: operator,
+    }));
   });
   readonly presetGroups = computed(() =>
     groupPresetsForMenu(this.project().chip, this.project().customPresets ?? []),
@@ -189,7 +231,7 @@ export class TrackerComponent {
         { id: 'vgm' as const, label: 'VGM' },
       ];
     }
-    if (chip === 'c64' || chip === 'nes') {
+    if (chip === 'c64' || chip === 'nes' || isFmChip(chip)) {
       return [{ id: 'wav' as const, label: 'WAV' }];
     }
     if (chip === 'atarist') {
@@ -219,8 +261,9 @@ export class TrackerComponent {
       }
     });
     effect(() => {
-      if (this.renamingInstrumentId() && this.instrumentRenameInput()) {
-        queueMicrotask(() => this.instrumentRenameInput()?.nativeElement.focus());
+      // Focus the dialog itself, not the name field, so Z–M still audition.
+      if (this.instrumentEditorOpen() && this.instrumentDialog()) {
+        queueMicrotask(() => this.instrumentDialog()?.nativeElement.focus());
       }
     });
     effect(() => {
@@ -239,8 +282,22 @@ export class TrackerComponent {
       snip: 'Snip',
       sid: 'SID',
       triangle: 'Triangle',
+      fm: 'FM',
     };
     return labels[kind];
+  }
+
+  /** Open the instrument editor on `id`, arming it first so Test plays that sound. */
+  openInstrumentEditor(id: string): void {
+    if (id !== this.project().armedInstrumentId) {
+      this.session.arm(id);
+    }
+    this.studioFocused.set(true);
+    this.instrumentEditorOpen.set(true);
+  }
+
+  closeInstrumentEditor(): void {
+    this.instrumentEditorOpen.set(false);
   }
 
   instrumentFitsCursor(kind: InstrumentKind): boolean {
@@ -248,10 +305,12 @@ export class TrackerComponent {
   }
 
   chipOptionLabel(id: string): string {
-    if (id === 'gameboy' || id === 'vectrex' || id === 'c64' || id === 'atarist' || id === 'nes') {
-      return chipLabel(id);
-    }
-    return id;
+    return isChipId(id) ? chipLabel(id) : id;
+  }
+
+  /** Columns the chip has but Chippy does not drive yet. */
+  channelPlaceholder(index: number): boolean {
+    return channelIsPlaceholder(this.project().chip, index);
   }
 
   label(
@@ -344,31 +403,36 @@ export class TrackerComponent {
       this.session.move(0, 0, 1);
       this.syncArmedFromCursor();
     } else if (key === 'Backspace' || key === 'Delete') {
-      if (!this.studioFocused()) {
+      if (!this.auditionOnly()) {
         this.session.clear();
       }
     } else if (key === '`' || key === '~') {
-      if (!this.studioFocused()) {
+      if (!this.auditionOnly()) {
         this.session.enterCut();
       }
     } else if (key === '[' || key === ']') {
       this.session.octave(this.state().octave + (key === ']' ? 1 : -1));
-    } else if (!this.studioFocused() && this.state().cursor.column === 'instrument') {
+    } else if (!this.auditionOnly() && this.state().cursor.column === 'instrument') {
       this.enterInstrumentKey(key);
-    } else if (!this.studioFocused() && this.state().cursor.column === 'volume' && /^[0-9a-f]$/i.test(key)) {
+    } else if (!this.auditionOnly() && this.state().cursor.column === 'volume' && /^[0-9a-f]$/i.test(key)) {
       this.session.volume(parseInt(key, 16));
-    } else if (!this.studioFocused() && this.state().cursor.column === 'effect') {
+    } else if (!this.auditionOnly() && this.state().cursor.column === 'effect') {
       this.enterEffectKey(key);
-    } else if (this.studioFocused() || this.state().cursor.column === 'note') {
+    } else if (this.auditionOnly() || this.state().cursor.column === 'note') {
       const midi = noteFromKey(key.toLowerCase(), this.state().octave);
       if (midi !== null) {
         this.auditionMidi(midi);
-        if (!this.studioFocused()) {
+        if (!this.auditionOnly()) {
           this.session.enterNote(midi);
           this.syncArmedFromCursor();
         }
       }
     }
+  }
+
+  /** While the editor is open, piano keys only audition; they never write cells. */
+  private auditionOnly(): boolean {
+    return this.studioFocused() || this.instrumentEditorOpen();
   }
 
   private enterInstrumentKey(key: string): void {
@@ -436,6 +500,9 @@ export class TrackerComponent {
   }
 
   fieldValue(key: string): string | number | boolean {
+    if (isFmPatchFieldKey(key)) {
+      return fmFieldValue(this.armed(), key);
+    }
     const instrument = this.armed() as unknown as Record<string, string | number | boolean | null>;
     return instrument[key] ?? '';
   }
@@ -517,7 +584,7 @@ export class TrackerComponent {
       .filter((step): step is number => step !== null);
     this.session.updateInstrument(this.armed().id, {
       [key]: steps.length > 0 ? steps : null,
-    } as Partial<import('@chippy/domain').Instrument>);
+    } as Partial<Instrument>);
     this.afterInstrumentPatch();
   }
 
@@ -532,7 +599,26 @@ export class TrackerComponent {
     if (control === 'toggle') {
       value = raw === 'true';
     }
-    this.session.updateInstrument(this.armed().id, { [key]: value } as Partial<import('@chippy/domain').Instrument>);
+    const patch = isFmPatchFieldKey(key)
+      ? patchFmField(this.armed(), key, typeof value === 'string' ? Number(value) : value)
+      : ({ [key]: value } as Partial<Instrument>);
+    this.session.updateInstrument(this.armed().id, patch);
+    this.afterInstrumentPatch(live);
+  }
+
+  operatorValue(index: number, key: keyof FmOperator): number {
+    return this.fmOperators()[index]?.values[key] ?? 0;
+  }
+
+  patchOperator(index: number, key: keyof FmOperator, raw: string, live = false): void {
+    const value = Number(raw);
+    if (!Number.isFinite(value)) {
+      return;
+    }
+    this.session.updateInstrument(
+      this.armed().id,
+      patchFmOperator(this.armed(), index, key, value),
+    );
     this.afterInstrumentPatch(live);
   }
 
@@ -586,32 +672,6 @@ export class TrackerComponent {
     } else if (event.key === 'Escape') {
       event.preventDefault();
       this.renamingId.set(null);
-    }
-  }
-
-  beginInstrumentRename(id: string, name: string): void {
-    this.renamingInstrumentId.set(id);
-    this.instrumentRenameDraft.set(name);
-  }
-
-  commitInstrumentRename(id: string): void {
-    if (this.renamingInstrumentId() !== id) {
-      return;
-    }
-    const draft = this.instrumentRenameDraft().trim();
-    this.renamingInstrumentId.set(null);
-    if (draft) {
-      this.session.renameInstrument(id, draft);
-    }
-  }
-
-  onInstrumentRenameKey(event: KeyboardEvent, id: string): void {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      (event.target as HTMLInputElement).blur();
-    } else if (event.key === 'Escape') {
-      event.preventDefault();
-      this.renamingInstrumentId.set(null);
     }
   }
 
@@ -736,6 +796,10 @@ export class TrackerComponent {
       this.closePresetsModal();
       return;
     }
+    if (this.instrumentEditorOpen()) {
+      this.closeInstrumentEditor();
+      return;
+    }
     if (this.exportOpen()) {
       this.exportOpen.set(false);
     }
@@ -800,7 +864,7 @@ export class TrackerComponent {
   }
 
   chipChange(id: string): void {
-    if (id !== 'gameboy' && id !== 'vectrex' && id !== 'c64' && id !== 'atarist' && id !== 'nes') {
+    if (!isChipId(id)) {
       return;
     }
     if (id === this.project().chip) {
@@ -819,7 +883,7 @@ export class TrackerComponent {
     void this.finishChipChange(id, saveFirst);
   }
 
-  private async finishChipChange(id: 'gameboy' | 'vectrex' | 'c64' | 'atarist' | 'nes', saveFirst: boolean): Promise<void> {
+  private async finishChipChange(id: ChipId, saveFirst: boolean): Promise<void> {
     if (saveFirst) {
       await this.save();
     }

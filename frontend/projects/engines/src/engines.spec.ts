@@ -2,21 +2,31 @@ import { describe, expect, it } from 'vitest';
 import {
   addInstrument,
   addSnipInstrument,
+  channelIsPlaceholder,
+  chipDefinition,
+  defaultFmPatch,
   enterCut,
   enterNote,
   newProject,
   newSession,
+  randomSong,
   songForRender,
   updateInstrument,
 } from '@chippy/domain';
 import {
   ayPeriod,
+  createFmSynthState,
   framesPerRow,
+  isFmChipId,
+  isFmRender,
   midiToHz,
   nesDutyFraction,
   nesTimer,
   renderSong,
+  silentFmVoiceFrame,
+  softFmVoiceFrame,
   softNesChannelFrame,
+  synthesizeFmSamples,
 } from '@chippy/engines';
 
 describe('timing helpers', () => {
@@ -437,5 +447,113 @@ describe('renderSong', () => {
     if (noiseRendered.chip === 'c64') {
       expect(noiseRendered.frames[0].voices[0].wave).toBe('noise');
     }
+  });
+});
+
+describe('soft FM helpers', () => {
+  const base = {
+    patch: defaultFmPatch(),
+    volume: 15,
+    volumeMacro: null,
+    pitchMacro: null,
+    gateAge: 8,
+    gated: true,
+    frameRate: 60,
+  };
+
+  it('silences inactive, gateless, and zero-volume voices', () => {
+    expect(softFmVoiceFrame({ ...base, midi: 60, active: false }).hz).toBe(0);
+    expect(softFmVoiceFrame({ ...base, midi: null, active: true }).hz).toBe(0);
+    expect(softFmVoiceFrame({ ...base, midi: 60, active: true, volume: 0 }).hz).toBe(0);
+    expect(silentFmVoiceFrame().amp).toBe(0);
+  });
+
+  it('resolves pitch, operator levels, and LFO depth from the patch', () => {
+    const voice = softFmVoiceFrame({ ...base, midi: 69, active: true });
+    expect(voice.hz).toBeCloseTo(440, 3);
+    expect(voice.amp).toBeCloseTo(1, 5);
+    expect(voice.operators).toHaveLength(4);
+    expect(voice.operators.some((operator) => operator.level > 0)).toBe(true);
+    expect(voice.lfoHz).toBe(0);
+
+    const lfo = softFmVoiceFrame({
+      ...base,
+      midi: 69,
+      active: true,
+      patch: { ...defaultFmPatch(), lfoEnable: true, lfoFrequency: 3, pms: 5, ams: 2 },
+    });
+    expect(lfo.lfoHz).toBeGreaterThan(0);
+    expect(lfo.pitchDepth).toBeGreaterThan(0);
+    expect(lfo.ampDepth).toBeGreaterThan(0);
+  });
+
+  it('follows macros and decays after the note is released', () => {
+    const macro = softFmVoiceFrame({
+      ...base,
+      midi: 60,
+      active: true,
+      gateAge: 3,
+      volumeMacro: [15, 15, 10],
+      pitchMacro: [0, 0, 12],
+    });
+    expect(macro.hz).toBeCloseTo(midiToHz(72), 3);
+    expect(macro.amp).toBeCloseTo(10 / 15, 5);
+
+    const released = softFmVoiceFrame({ ...base, midi: 60, active: true, gated: false, gateAge: 2 });
+    const later = softFmVoiceFrame({ ...base, midi: 60, active: true, gated: false, gateAge: 30 });
+    const peak = (frame: ReturnType<typeof softFmVoiceFrame>) =>
+      Math.max(...frame.operators.map((operator) => operator.level));
+    expect(peak(later)).toBeLessThan(peak(released));
+  });
+
+  it('synthesizes audio and honours the audible filter', () => {
+    const frames = Array.from({ length: 4 }, () => ({
+      channels: [softFmVoiceFrame({ ...base, midi: 69, active: true })],
+    }));
+    const state = createFmSynthState(1, 44100);
+    const samples = new Float32Array(4 * 735);
+    synthesizeFmSamples(state, frames, 735, samples);
+    expect(Math.max(...samples.map(Math.abs))).toBeGreaterThan(0);
+
+    const muted = new Float32Array(4 * 735);
+    synthesizeFmSamples(createFmSynthState(1, 44100), frames, 735, muted, () => false);
+    expect(Math.max(...muted.map(Math.abs))).toBe(0);
+  });
+});
+
+describe('FM song render', () => {
+  it('identifies FM chips and renders every FM chip to audible frames', () => {
+    expect(isFmChipId('genesis')).toBe(true);
+    expect(isFmChipId('nes')).toBe(false);
+
+    for (const chip of ['genesis', 'pc98', 'x68000'] as const) {
+      const rendered = renderSong(randomSong(chip, 7));
+      expect(isFmRender(rendered)).toBe(true);
+      if (!isFmRender(rendered)) {
+        continue;
+      }
+      const definition = chipDefinition(chip);
+      expect(rendered.frames[0].channels).toHaveLength(definition.channels.length);
+      const sounding = rendered.frames.some((frame) =>
+        frame.channels.some((channel) => channel.hz > 0 && channel.amp > 0),
+      );
+      expect(sounding).toBe(true);
+
+      // Placeholder channels have no legal instrument kind, so they stay silent.
+      definition.channels.forEach((_, index) => {
+        if (!channelIsPlaceholder(chip, index)) {
+          return;
+        }
+        expect(rendered.frames.every((frame) => frame.channels[index].hz === 0)).toBe(true);
+      });
+    }
+  });
+
+  it('renders the same frames for the same seed', () => {
+    const first = renderSong(randomSong('genesis', 11));
+    const second = renderSong(randomSong('genesis', 11));
+    expect(JSON.stringify(first.frames)).toBe(JSON.stringify(second.frames));
+    const other = renderSong(randomSong('genesis', 12));
+    expect(JSON.stringify(first.frames)).not.toBe(JSON.stringify(other.frames));
   });
 });

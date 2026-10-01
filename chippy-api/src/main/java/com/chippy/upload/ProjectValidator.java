@@ -76,9 +76,11 @@ public final class ProjectValidator {
         return null;
     }
 
+    private static final java.util.Set<String> KNOWN_CHIPS = java.util.Set.of(
+            "gameboy", "vectrex", "c64", "atarist", "nes", "genesis", "pc98", "x68000");
+
     private static void validateChip(String chip) {
-        if (!"gameboy".equals(chip) && !"vectrex".equals(chip) && !"c64".equals(chip)
-                && !"atarist".equals(chip) && !"nes".equals(chip)) {
+        if (!KNOWN_CHIPS.contains(chip)) {
             throw new UploadRejectedException("Unknown chip.");
         }
     }

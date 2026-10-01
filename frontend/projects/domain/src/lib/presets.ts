@@ -2,8 +2,10 @@ import { baseInstrument } from './chips';
 import type {
   ChipId,
   CustomInstrumentPreset,
+  FmOperator,
   Instrument,
   InstrumentKind,
+  InstrumentPatch,
   PresetRole,
 } from './types';
 
@@ -15,7 +17,7 @@ export interface InstrumentPreset {
   role: PresetRole;
   /** Premium presets need support perk or config.presets.unlockAll. */
   premium: boolean;
-  patch: Partial<Instrument>;
+  patch: InstrumentPatch;
 }
 
 /** A row in the Role → Kind preset menu (built-in or project custom). */
@@ -58,6 +60,7 @@ const KIND_LABELS: Record<InstrumentKind, string> = {
   snip: 'Snip',
   sid: 'SID',
   triangle: 'Triangle',
+  fm: 'FM',
 };
 
 function preset(
@@ -67,9 +70,14 @@ function preset(
   kind: InstrumentKind,
   role: PresetRole,
   premium: boolean,
-  patch: Partial<Instrument> = {},
+  patch: InstrumentPatch = {},
 ): InstrumentPreset {
   return { id, name, chip, kind, role, premium, patch };
+}
+
+/** Shorthand for one operator inside a preset FM patch. Unset fields keep their defaults. */
+function op(values: Partial<FmOperator>): Partial<FmOperator> {
+  return values;
 }
 
 /** Built-in starter banks. Values are original Chippy defaults, not copied dumps. */
@@ -344,6 +352,208 @@ export const INSTRUMENT_PRESETS: InstrumentPreset[] = [
     envelopePeriod: 3,
     noiseShort: false,
   }),
+  // Genesis (YM2612) free
+  preset('gen-fm-lead', 'FM lead', 'genesis', 'fm', 'lead', false, {
+    fm: {
+      algorithm: 4,
+      feedback: 4,
+      operators: [
+        op({ tl: 30, mul: 2, ar: 31, dr: 10, sr: 4, rr: 7, sl: 2 }),
+        op({ tl: 6, mul: 1, ar: 31, dr: 7, sr: 2, rr: 7, sl: 1 }),
+        op({ tl: 38, mul: 4, dt: 3, ar: 31, dr: 12, sr: 5, rr: 8, sl: 3 }),
+        op({ tl: 10, mul: 1, ar: 31, dr: 8, sr: 2, rr: 8, sl: 1 }),
+      ],
+    },
+  }),
+  preset('gen-fm-bass', 'FM bass', 'genesis', 'fm', 'bass', false, {
+    fm: {
+      algorithm: 2,
+      feedback: 6,
+      operators: [
+        op({ tl: 26, mul: 1, ar: 31, dr: 14, sr: 6, rr: 9, sl: 4 }),
+        op({ tl: 34, mul: 2, ar: 31, dr: 16, sr: 7, rr: 9, sl: 5 }),
+        op({ tl: 30, mul: 1, ar: 31, dr: 14, sr: 6, rr: 9, sl: 4 }),
+        op({ tl: 4, mul: 1, ar: 31, dr: 12, sr: 4, rr: 9, sl: 2 }),
+      ],
+    },
+  }),
+  preset('gen-fm-brass', 'FM brass', 'genesis', 'fm', 'pad', false, {
+    fm: {
+      algorithm: 3,
+      feedback: 3,
+      operators: [
+        op({ tl: 28, mul: 1, ar: 22, dr: 9, sr: 2, rr: 6, sl: 1 }),
+        op({ tl: 24, mul: 1, ar: 20, dr: 8, sr: 2, rr: 6, sl: 1 }),
+        op({ tl: 32, mul: 2, dt: 1, ar: 20, dr: 9, sr: 2, rr: 6, sl: 1 }),
+        op({ tl: 6, mul: 1, ar: 20, dr: 7, sr: 1, rr: 6, sl: 1 }),
+      ],
+    },
+  }),
+  preset('gen-fm-kick', 'FM kick', 'genesis', 'fm', 'percussion', false, {
+    fm: {
+      algorithm: 0,
+      feedback: 7,
+      operators: [
+        op({ tl: 20, mul: 0, ar: 31, dr: 24, sr: 20, rr: 15, sl: 12 }),
+        op({ tl: 24, mul: 1, ar: 31, dr: 24, sr: 20, rr: 15, sl: 12 }),
+        op({ tl: 28, mul: 1, ar: 31, dr: 24, sr: 20, rr: 15, sl: 12 }),
+        op({ tl: 2, mul: 0, ar: 31, dr: 22, sr: 18, rr: 15, sl: 10 }),
+      ],
+    },
+  }),
+  // Genesis premium
+  preset('gen-fm-bell', 'FM bell', 'genesis', 'fm', 'lead', true, {
+    fm: {
+      algorithm: 5,
+      feedback: 2,
+      operators: [
+        op({ tl: 34, mul: 7, dt: 3, ar: 31, dr: 10, sr: 6, rr: 6, sl: 4 }),
+        op({ tl: 12, mul: 1, ar: 31, dr: 13, sr: 7, rr: 6, sl: 5 }),
+        op({ tl: 16, mul: 3, dt: 1, ar: 31, dr: 15, sr: 8, rr: 6, sl: 6 }),
+        op({ tl: 20, mul: 5, dt: 6, ar: 31, dr: 17, sr: 9, rr: 6, sl: 7 }),
+      ],
+    },
+  }),
+  preset('gen-fm-sweep', 'FM sweep', 'genesis', 'fm', 'fx', true, {
+    pitchMacro: [0, 3, 7, 12, 17, 22, 24],
+    fm: {
+      algorithm: 1,
+      feedback: 7,
+      operators: [
+        op({ tl: 22, mul: 3, dt: 2, ar: 28, dr: 10, sr: 3, rr: 7, sl: 2 }),
+        op({ tl: 26, mul: 5, dt: 5, ar: 28, dr: 10, sr: 3, rr: 7, sl: 2 }),
+        op({ tl: 30, mul: 1, ar: 28, dr: 11, sr: 4, rr: 7, sl: 3 }),
+        op({ tl: 8, mul: 1, ar: 28, dr: 9, sr: 3, rr: 7, sl: 2 }),
+      ],
+    },
+  }),
+  // PC-98 (YM2608 / OPNA) free
+  preset('pc98-fm-lead', 'OPNA lead', 'pc98', 'fm', 'lead', false, {
+    fm: {
+      algorithm: 4,
+      feedback: 5,
+      operators: [
+        op({ tl: 28, mul: 3, dt: 1, ar: 31, dr: 9, sr: 3, rr: 7, sl: 2 }),
+        op({ tl: 6, mul: 1, ar: 31, dr: 7, sr: 2, rr: 7, sl: 1 }),
+        op({ tl: 36, mul: 2, dt: 4, ar: 31, dr: 11, sr: 4, rr: 7, sl: 3 }),
+        op({ tl: 12, mul: 1, ar: 31, dr: 8, sr: 2, rr: 7, sl: 2 }),
+      ],
+    },
+  }),
+  preset('pc98-fm-bass', 'OPNA bass', 'pc98', 'fm', 'bass', false, {
+    fm: {
+      algorithm: 0,
+      feedback: 5,
+      operators: [
+        op({ tl: 30, mul: 1, ar: 31, dr: 15, sr: 6, rr: 9, sl: 4 }),
+        op({ tl: 34, mul: 1, ar: 31, dr: 15, sr: 6, rr: 9, sl: 4 }),
+        op({ tl: 32, mul: 2, ar: 31, dr: 15, sr: 6, rr: 9, sl: 4 }),
+        op({ tl: 4, mul: 1, ar: 31, dr: 13, sr: 5, rr: 9, sl: 3 }),
+      ],
+    },
+  }),
+  preset('pc98-fm-strings', 'OPNA strings', 'pc98', 'fm', 'pad', false, {
+    fm: {
+      algorithm: 6,
+      feedback: 2,
+      operators: [
+        op({ tl: 30, mul: 1, ar: 16, dr: 6, sr: 1, rr: 5, sl: 1 }),
+        op({ tl: 14, mul: 1, dt: 1, ar: 16, dr: 6, sr: 1, rr: 5, sl: 1 }),
+        op({ tl: 18, mul: 1, dt: 5, ar: 16, dr: 6, sr: 1, rr: 5, sl: 1 }),
+        op({ tl: 22, mul: 2, dt: 2, ar: 16, dr: 7, sr: 1, rr: 5, sl: 2 }),
+      ],
+    },
+  }),
+  preset('pc98-fm-snare', 'OPNA snare', 'pc98', 'fm', 'percussion', false, {
+    fm: {
+      algorithm: 1,
+      feedback: 7,
+      operators: [
+        op({ tl: 18, mul: 11, dt: 3, ar: 31, dr: 26, sr: 22, rr: 15, sl: 13 }),
+        op({ tl: 22, mul: 13, dt: 6, ar: 31, dr: 26, sr: 22, rr: 15, sl: 13 }),
+        op({ tl: 26, mul: 9, ar: 31, dr: 26, sr: 22, rr: 15, sl: 13 }),
+        op({ tl: 6, mul: 7, ar: 31, dr: 24, sr: 20, rr: 15, sl: 12 }),
+      ],
+    },
+  }),
+  // PC-98 premium
+  preset('pc98-fm-bell', 'OPNA bell', 'pc98', 'fm', 'lead', true, {
+    fm: {
+      algorithm: 7,
+      feedback: 1,
+      operators: [
+        op({ tl: 14, mul: 1, ar: 31, dr: 12, sr: 6, rr: 6, sl: 4 }),
+        op({ tl: 22, mul: 3, dt: 1, ar: 31, dr: 14, sr: 7, rr: 6, sl: 5 }),
+        op({ tl: 28, mul: 6, dt: 5, ar: 31, dr: 16, sr: 8, rr: 6, sl: 6 }),
+        op({ tl: 34, mul: 9, dt: 3, ar: 31, dr: 18, sr: 9, rr: 6, sl: 7 }),
+      ],
+    },
+  }),
+  // X68000 (YM2151 / OPM) free
+  preset('x68-fm-lead', 'OPM lead', 'x68000', 'fm', 'lead', false, {
+    fm: {
+      algorithm: 4,
+      feedback: 6,
+      operators: [
+        op({ tl: 26, mul: 2, dt: 2, ar: 31, dr: 8, sr: 3, rr: 7, sl: 2 }),
+        op({ tl: 4, mul: 1, ar: 31, dr: 6, sr: 2, rr: 7, sl: 1 }),
+        op({ tl: 34, mul: 4, dt: 5, ar: 31, dr: 10, sr: 4, rr: 7, sl: 3 }),
+        op({ tl: 10, mul: 1, ar: 31, dr: 7, sr: 2, rr: 7, sl: 2 }),
+      ],
+    },
+  }),
+  preset('x68-fm-bass', 'OPM bass', 'x68000', 'fm', 'bass', false, {
+    fm: {
+      algorithm: 2,
+      feedback: 7,
+      operators: [
+        op({ tl: 24, mul: 1, ar: 31, dr: 16, sr: 7, rr: 10, sl: 5 }),
+        op({ tl: 32, mul: 3, ar: 31, dr: 18, sr: 8, rr: 10, sl: 6 }),
+        op({ tl: 28, mul: 1, dt: 1, ar: 31, dr: 16, sr: 7, rr: 10, sl: 5 }),
+        op({ tl: 2, mul: 1, ar: 31, dr: 14, sr: 5, rr: 10, sl: 3 }),
+      ],
+    },
+  }),
+  preset('x68-fm-pad', 'OPM pad', 'x68000', 'fm', 'pad', false, {
+    fm: {
+      algorithm: 6,
+      feedback: 1,
+      lfoEnable: true,
+      lfoFrequency: 3,
+      pms: 2,
+      operators: [
+        op({ tl: 32, mul: 1, ar: 14, dr: 5, sr: 1, rr: 4, sl: 1 }),
+        op({ tl: 16, mul: 1, dt: 2, ar: 14, dr: 5, sr: 1, rr: 4, sl: 1 }),
+        op({ tl: 20, mul: 1, dt: 6, ar: 14, dr: 5, sr: 1, rr: 4, sl: 1 }),
+        op({ tl: 24, mul: 2, dt: 1, ar: 14, dr: 6, sr: 1, rr: 4, sl: 2 }),
+      ],
+    },
+  }),
+  preset('x68-fm-hat', 'OPM hat', 'x68000', 'fm', 'percussion', false, {
+    fm: {
+      algorithm: 7,
+      feedback: 7,
+      operators: [
+        op({ tl: 20, mul: 12, dt: 7, ar: 31, dr: 28, sr: 24, rr: 15, sl: 14 }),
+        op({ tl: 24, mul: 14, dt: 4, ar: 31, dr: 28, sr: 24, rr: 15, sl: 14 }),
+        op({ tl: 28, mul: 10, dt: 2, ar: 31, dr: 28, sr: 24, rr: 15, sl: 14 }),
+        op({ tl: 32, mul: 15, dt: 6, ar: 31, dr: 28, sr: 24, rr: 15, sl: 14 }),
+      ],
+    },
+  }),
+  // X68000 premium
+  preset('x68-fm-organ', 'OPM organ', 'x68000', 'fm', 'pad', true, {
+    fm: {
+      algorithm: 7,
+      feedback: 0,
+      operators: [
+        op({ tl: 10, mul: 1, ar: 31, dr: 0, sr: 0, rr: 8, sl: 0 }),
+        op({ tl: 18, mul: 2, ar: 31, dr: 0, sr: 0, rr: 8, sl: 0 }),
+        op({ tl: 24, mul: 4, ar: 31, dr: 0, sr: 0, rr: 8, sl: 0 }),
+        op({ tl: 30, mul: 8, ar: 31, dr: 0, sr: 0, rr: 8, sl: 0 }),
+      ],
+    },
+  }),
 ];
 
 export function presetsForChip(chip: ChipId): InstrumentPreset[] {
@@ -417,7 +627,7 @@ export function groupPresetsForMenu(
 }
 
 /** Snapshot instrument fields into a patch (excludes id/name). */
-export function instrumentToPresetPatch(instrument: Instrument): Partial<Instrument> {
+export function instrumentToPresetPatch(instrument: Instrument): InstrumentPatch {
   const { id: _id, name: _name, ...rest } = instrument;
   return rest;
 }

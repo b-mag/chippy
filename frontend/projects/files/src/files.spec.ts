@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { enterNote, newProject, newSession, songForRender, updateInstrument } from '@chippy/domain';
+import { enterNote, newProject, newSession, randomSong, songForRender, updateInstrument } from '@chippy/domain';
 import { renderSong } from '@chippy/engines';
 import {
   a4Hz,
@@ -238,6 +238,23 @@ describe('export helpers', () => {
     expect(() => exportVgm(nesSong)).toThrow(/Game Boy/);
     expect(renderPcm(renderSong(nesSong)).length).toBeGreaterThan(0);
     expect(renderPcm(renderSong(stSong)).length).toBeGreaterThan(0);
+  });
+
+  it('exports wav for the FM chips and rejects the register formats', () => {
+    for (const chip of ['genesis', 'pc98', 'x68000'] as const) {
+      const song = randomSong(chip, 3);
+      const rendered = renderSong(song);
+      expect(rendered.chip).toBe(chip);
+      const pcm = renderPcm(rendered);
+      expect(pcm.length).toBeGreaterThan(0);
+      expect(Math.max(...pcm.map(Math.abs))).toBeGreaterThan(0);
+      const wav = exportWav(song);
+      expect(wav.filename.endsWith('.wav')).toBe(true);
+      expect(wav.bytes.length).toBeGreaterThan(44);
+      expect(() => exportYm(song)).toThrow(/Vectrex|Atari ST/);
+      expect(() => exportVgm(song)).toThrow(/Game Boy/);
+      expect(() => exportAky(song)).toThrow(/Vectrex/);
+    }
   });
 
   it('covers pcm edge paths and ym parse errors', () => {

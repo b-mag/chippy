@@ -12,6 +12,7 @@ import {
   auditionChannelId,
   auditionChannelIndex,
   changeInstrumentKind,
+  channelIsPlaceholder,
   defaultRoleForKind,
   groupPresetsForMenu,
   instrumentToPresetPatch,
@@ -88,6 +89,22 @@ describe('session editing', () => {
     expect(activeSongBody(redo(afterUndo).project).patterns[0].rows[0][0].volume).toBe(10);
     expect(undo(newSession('gameboy'))).toEqual(newSession('gameboy'));
     expect(redo(newSession('gameboy'))).toEqual(newSession('gameboy'));
+  });
+
+  it('refuses edits on placeholder channels of FM chips', () => {
+    const start = newSession('genesis');
+    const placeholder = chipDefinition('genesis').channels.findIndex((_, index) =>
+      channelIsPlaceholder('genesis', index),
+    );
+    expect(placeholder).toBeGreaterThan(-1);
+    const onPlaceholder = { ...start, cursor: { ...start.cursor, channel: placeholder } };
+    expect(enterNote(onPlaceholder, 60)).toBe(onPlaceholder);
+    expect(enterCut(onPlaceholder)).toBe(onPlaceholder);
+    expect(setVolume(onPlaceholder, 10)).toBe(onPlaceholder);
+
+    const fm = enterNote(start, 60);
+    expect(activeSongBody(fm.project).patterns[0].rows[0][0].note).toBe(60);
+    expect(fm.project.instruments[0].kind).toBe('fm');
   });
 
   it('moves the cursor and advances columns', () => {

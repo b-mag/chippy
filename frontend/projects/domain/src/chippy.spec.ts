@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   activeSongBody,
   addSnipInstrument,
+  channelIsPlaceholder,
+  chipDefinition,
   confirmationAccepted,
   enterNote,
   formatNote,
@@ -50,6 +52,27 @@ describe('random pattern fill', () => {
     const notes = first.patterns[0].rows.flat().filter((cell) => cell.note !== null);
     expect(notes.length).toBeGreaterThan(0);
     expect(randomSong('gameboy', 8)).not.toEqual(first);
+  });
+
+  it('fills FM channels and leaves placeholder channels empty', () => {
+    for (const chip of ['genesis', 'pc98', 'x68000'] as const) {
+      const song = randomSong(chip, 5);
+      const definition = chipDefinition(chip);
+      const rows = song.patterns[0].rows;
+      definition.channels.forEach((_, index) => {
+        const notes = rows.filter((row) => row[index].note !== null);
+        if (channelIsPlaceholder(chip, index)) {
+          expect(notes).toHaveLength(0);
+          return;
+        }
+        expect(notes.length).toBeGreaterThan(0);
+        notes.forEach((row) => {
+          expect(row[index].note).toBeGreaterThanOrEqual(0);
+          const instrument = song.instruments.find((item) => item.id === row[index].instrumentId);
+          expect(instrument?.kind).toBe('fm');
+        });
+      });
+    }
   });
 
   it('keeps replaceWithRandom gated on YES for legacy callers', () => {

@@ -100,28 +100,41 @@
     </div>
   </aside>
 
-  <section class="grid" role="grid" aria-label="Pattern" (focusin)="studioFocused.set(false)">
+  <section
+    class="grid"
+    role="grid"
+    aria-label="Pattern"
+    [style.--channels]="chip().channels.length"
+    (focusin)="studioFocused.set(false)">
     <h2 class="grid-title" title="Pattern grid: 16 rows. Columns per channel are Note, Instrument, Volume, FX.">Pattern</h2>
     <div class="grid-head" role="row">
       <span></span>
       @for (channel of chip().channels; track channel.id; let index = $index) {
-        <span class="channel-head" role="columnheader">
-          <span class="channel-title" [title]="channel.alias ? channel.label + ' (' + channel.alias + ')' : channel.label">
+        <span class="channel-head" role="columnheader" [class.channel-placeholder]="channel.placeholder">
+          <span
+            class="channel-title"
+            [title]="channel.placeholder
+              ? channel.label + ' — ' + channel.placeholderNote
+              : (channel.alias ? channel.label + ' (' + channel.alias + ')' : channel.label)">
             {{ channel.label }}
             @if (channel.alias) {
               <span class="channel-alias">{{ channel.alias }}</span>
             }
           </span>
-          <span class="column-keys" aria-hidden="true">
-            <span title="Note: piano keys write a pitch. ` or ~ = note cut (OFF).">N</span>
-            <span title="Instrument: type 1–9 (or the panel number) to assign that instrument. 0 clears.">I</span>
-            <span title="Volume: hex 0–F. Empty (..) keeps the instrument’s own level.">V</span>
-            <span title="FX: A = volume slide down, D = delay note, R = retrigger. Letter then hex value.">FX</span>
-          </span>
-          <span class="channel-toggles">
-            <button type="button" class="btn-mute" title="Mute this channel during playback" (click)="toggleChannel('mute', index)">{{ muted().has(index) ? 'Unmute' : 'Mute' }}</button>
-            <button type="button" class="btn-solo" title="Solo this channel (others silent)" (click)="toggleChannel('solo', index)">{{ solo().has(index) ? 'Unsolo' : 'Solo' }}</button>
-          </span>
+          @if (channel.placeholder) {
+            <span class="channel-soon" [title]="channel.placeholderNote">not wired up yet</span>
+          } @else {
+            <span class="column-keys" aria-hidden="true">
+              <span title="Note: piano keys write a pitch. ` or ~ = note cut (OFF).">N</span>
+              <span title="Instrument: type 1–9 (or the panel number) to assign that instrument. 0 clears.">I</span>
+              <span title="Volume: hex 0–F. Empty (..) keeps the instrument’s own level.">V</span>
+              <span title="FX: A = volume slide down, D = delay note, R = retrigger. Letter then hex value.">FX</span>
+            </span>
+            <span class="channel-toggles">
+              <button type="button" class="btn-mute" title="Mute this channel during playback" (click)="toggleChannel('mute', index)">{{ muted().has(index) ? 'Unmute' : 'Mute' }}</button>
+              <button type="button" class="btn-solo" title="Solo this channel (others silent)" (click)="toggleChannel('solo', index)">{{ solo().has(index) ? 'Unsolo' : 'Solo' }}</button>
+            </span>
+          }
         </span>
       }
     </div>
@@ -129,15 +142,16 @@
       <div class="grid-row" role="row" [class.playhead]="playRow() === row.rowIndex">
         <span class="row-num" title="Row {{ row.rowIndex }} of 16 (a sixteenth note at the song tempo)">{{ row.rowIndex }}</span>
         @for (channel of row.channels; track channel.id) {
-          <span class="channel-cells">
+          <span class="channel-cells" [class.channel-placeholder]="channel.placeholder">
             @for (cell of channel.cells; track cell.column) {
               <button
                 type="button"
                 role="gridcell"
                 class="cell"
                 [class.cursor]="cell.selected"
+                [disabled]="channel.placeholder"
                 [attr.aria-selected]="cell.selected"
-                [attr.title]="columnTooltip(cell.column)"
+                [attr.title]="channel.placeholder ? 'This channel is not wired up yet.' : columnTooltip(cell.column)"
                 (click)="place(row.rowIndex, channel.index, cell.column)">
                 {{ cell.text }}
               </button>
@@ -154,124 +168,25 @@
     <ul class="instrument-list">
       @for (instrument of project().instruments; track instrument.id) {
         <li>
-          @if (renamingInstrumentId() === instrument.id) {
-            <input
-              class="instrument-rename"
-              [value]="instrumentRenameDraft()"
-              (input)="instrumentRenameDraft.set(($any($event.target)).value)"
-              (keydown)="onInstrumentRenameKey($event, instrument.id)"
-              (blur)="commitInstrumentRename(instrument.id)"
-              #instrumentRenameInput />
-          } @else {
-            <button
-              type="button"
-              [attr.aria-pressed]="instrument.id === project().armedInstrumentId"
-              [class.instrument-mismatch]="!instrumentFitsCursor(instrument.kind)"
-              (click)="session.arm(instrument.id)"
-              (dblclick)="beginInstrumentRename(instrument.id, instrument.name)"
-              [title]="instrumentFitsCursor(instrument.kind) ? kindLabel(instrument.kind) + ' instrument' : kindLabel(instrument.kind) + ' — not for the selected channel'">
-              <span class="instrument-num">{{ instrumentNumberLabel(instrument.id) }}</span>
-              <span class="instrument-name">{{ instrument.name }}</span>
-              <span class="instrument-kind">({{ kindLabel(instrument.kind) }})</span>
-            </button>
-          }
+          <button
+            type="button"
+            [attr.aria-pressed]="instrument.id === project().armedInstrumentId"
+            [class.instrument-mismatch]="!instrumentFitsCursor(instrument.kind)"
+            (click)="session.arm(instrument.id)"
+            (dblclick)="openInstrumentEditor(instrument.id)"
+            [title]="(instrumentFitsCursor(instrument.kind) ? kindLabel(instrument.kind) + ' instrument' : kindLabel(instrument.kind) + ' — not for the selected channel') + ' · double-click to edit'">
+            <span class="instrument-num">{{ instrumentNumberLabel(instrument.id) }}</span>
+            <span class="instrument-name">{{ instrument.name }}</span>
+            <span class="instrument-kind">({{ kindLabel(instrument.kind) }})</span>
+          </button>
         </li>
       }
     </ul>
 
-    <div class="instrument-editor">
-      <label>Name
-        <input
-          [value]="armed().name"
-          (change)="session.renameInstrument(armed().id, ($any($event.target)).value)" />
-      </label>
-
-      <label>Type
-        <select [value]="armed().kind" (change)="changeKind(($any($event.target)).value)">
-          @for (kind of kindOptions(); track kind) {
-            <option [value]="kind">{{ kindLabel(kind) }}</option>
-          }
-        </select>
-      </label>
-
-      <div class="audition-strip" aria-label="Audition">
-        <span class="audition-label">Test</span>
-        <button type="button" (click)="session.octave(state().octave - 1)">Oct −</button>
-        <button type="button" (click)="session.octave(state().octave + 1)">Oct +</button>
-        @for (semitone of [0, 2, 4, 5, 7, 9, 11]; track semitone) {
-          <button type="button" class="note-key" (click)="auditionNoteOffset(semitone)">
-            {{ ['C','D','E','F','G','A','B'][$index] }}
-          </button>
-        }
-      </div>
-      <p class="audition-hint">Keys Z–M / Q–U test the armed sound here without writing the grid.</p>
-
-      <div class="studio-hardware">
-        <h3>{{ chip().label }} · {{ kindLabel(armed().kind) }}</h3>
-        @for (field of hardwareFields(); track field.key) {
-          @if (field.control === 'toggle') {
-            <label class="field-row">{{ field.label }}
-              <input type="checkbox" [checked]="fieldValue(field.key) === true" (change)="patchField(field.key, ($any($event.target)).checked ? 'true' : 'false', 'toggle')" />
-            </label>
-          } @else if (field.control === 'select') {
-            <label class="field-row">{{ field.label }}
-              <select [value]="fieldValue(field.key)" (change)="patchField(field.key, ($any($event.target)).value, 'select')">
-                @for (option of field.options; track option.label) {
-                  <option [value]="option.value">{{ option.label }}</option>
-                }
-              </select>
-            </label>
-          } @else if (field.control === 'macro') {
-            <label class="field-macro">{{ field.label }}
-              <input
-                type="text"
-                [value]="macroText(field.key)"
-                placeholder="e.g. F E D C 0"
-                (change)="patchMacro(field.key, ($any($event.target)).value, field.min ?? 0, field.max ?? 15)" />
-            </label>
-          } @else if (field.control === 'knob') {
-            <div class="field-knob">
-              <span class="field-knob-label">{{ field.label }}</span>
-              <button
-                type="button"
-                class="knob"
-                [attr.aria-label]="field.label"
-                [attr.aria-valuemin]="field.min ?? 0"
-                [attr.aria-valuemax]="field.max ?? 15"
-                [attr.aria-valuenow]="numericField(field.key)"
-                [style.--knob-angle]="knobAngle(field.key, field.min ?? 0, field.max ?? 15) + 'deg'"
-                (pointerdown)="startKnobDrag($event, field.key, field.min ?? 0, field.max ?? 15)"></button>
-              <input
-                type="number"
-                class="knob-number"
-                [min]="field.min"
-                [max]="field.max"
-                [value]="numericField(field.key)"
-                (input)="patchField(field.key, ($any($event.target)).value, 'number', true)"
-                (change)="patchField(field.key, ($any($event.target)).value, 'number')" />
-            </div>
-          } @else {
-            <label class="field-row">{{ field.label }}
-              <input type="number" [min]="field.min" [max]="field.max" [value]="fieldValue(field.key)" (change)="patchField(field.key, ($any($event.target)).value, 'number')" />
-            </label>
-          }
-        }
-        @if (hardwareFields().length === 0) {
-          <p class="hardware-empty">No hardware controls for this type.</p>
-        }
-        @if ((project().chip === 'vectrex' || project().chip === 'atarist') && armed().kind === 'tone') {
-          <p class="hardware-hint">
-            @if (project().chip === 'vectrex') {
-              Noise and hardware envelope need YM6 export; AKY is software tones only.
-            } @else {
-              Noise and hardware envelope export via YM6.
-            }
-          </p>
-        }
-      </div>
-    </div>
+    <p class="instrument-hint">Double-click an instrument to edit its name, type, and sound.</p>
 
     <div class="instrument-actions">
+      <button type="button" class="btn-edit-instrument" (click)="openInstrumentEditor(armed().id)">Edit instrument…</button>
       <button type="button" (click)="session.addInstrument()">Add instrument</button>
       <button type="button" (click)="openPresetsModal()">Add from presets…</button>
       <button type="button" (click)="pickImportInstrument()">Import instrument…</button>
@@ -288,6 +203,165 @@
       }
     </div>
   </aside>
+
+  @if (instrumentEditorOpen()) {
+    <div class="preset-modal-layer">
+      <div class="preset-modal-backdrop" (click)="closeInstrumentEditor()"></div>
+      <div
+        #instrumentDialog
+        class="preset-modal instrument-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Edit instrument"
+        tabindex="-1"
+        (click)="$event.stopPropagation()">
+        <div class="preset-modal-header">
+          <h3>Edit instrument · {{ chip().label }}</h3>
+          <button type="button" class="preset-modal-close" (click)="closeInstrumentEditor()" aria-label="Close">×</button>
+        </div>
+
+        <div class="instrument-modal-body">
+          <div class="instrument-identity">
+            <label>Name
+              <input
+                [value]="armed().name"
+                (change)="session.renameInstrument(armed().id, ($any($event.target)).value)" />
+            </label>
+
+            <label>Type
+              <select [value]="armed().kind" (change)="changeKind(($any($event.target)).value)">
+                @for (kind of kindOptions(); track kind) {
+                  <option [value]="kind">{{ kindLabel(kind) }}</option>
+                }
+              </select>
+            </label>
+          </div>
+
+          <div class="audition-strip" aria-label="Audition">
+            <span class="audition-label">Test</span>
+            <button type="button" (click)="session.octave(state().octave - 1)">Oct −</button>
+            <button type="button" (click)="session.octave(state().octave + 1)">Oct +</button>
+            @for (semitone of [0, 2, 4, 5, 7, 9, 11]; track semitone) {
+              <button type="button" class="note-key" (click)="auditionNoteOffset(semitone)">
+                {{ ['C','D','E','F','G','A','B'][$index] }}
+              </button>
+            }
+          </div>
+          <p class="audition-hint">Keys Z–M / Q–U test this sound without writing the grid.</p>
+
+          <div class="studio-hardware">
+            <h3>{{ chip().label }} · {{ kindLabel(armed().kind) }}</h3>
+            @for (field of hardwareFields(); track field.key) {
+              @if (field.control === 'toggle') {
+                <label class="field-row">{{ field.label }}
+                  <input type="checkbox" [checked]="fieldValue(field.key) === true" (change)="patchField(field.key, ($any($event.target)).checked ? 'true' : 'false', 'toggle')" />
+                </label>
+              } @else if (field.control === 'select') {
+                <label class="field-row">{{ field.label }}
+                  <select [value]="fieldValue(field.key)" (change)="patchField(field.key, ($any($event.target)).value, 'select')">
+                    @for (option of field.options; track option.label) {
+                      <option [value]="option.value">{{ option.label }}</option>
+                    }
+                  </select>
+                </label>
+              } @else if (field.control === 'macro') {
+                <label class="field-macro">{{ field.label }}
+                  <input
+                    type="text"
+                    [value]="macroText(field.key)"
+                    placeholder="e.g. F E D C 0"
+                    (change)="patchMacro(field.key, ($any($event.target)).value, field.min ?? 0, field.max ?? 15)" />
+                </label>
+              } @else if (field.control === 'knob') {
+                <div class="field-knob">
+                  <span class="field-knob-label">{{ field.label }}</span>
+                  <button
+                    type="button"
+                    class="knob"
+                    [attr.aria-label]="field.label"
+                    [attr.aria-valuemin]="field.min ?? 0"
+                    [attr.aria-valuemax]="field.max ?? 15"
+                    [attr.aria-valuenow]="numericField(field.key)"
+                    [style.--knob-angle]="knobAngle(field.key, field.min ?? 0, field.max ?? 15) + 'deg'"
+                    (pointerdown)="startKnobDrag($event, field.key, field.min ?? 0, field.max ?? 15)"></button>
+                  <input
+                    type="number"
+                    class="knob-number"
+                    [min]="field.min"
+                    [max]="field.max"
+                    [value]="numericField(field.key)"
+                    (input)="patchField(field.key, ($any($event.target)).value, 'number', true)"
+                    (change)="patchField(field.key, ($any($event.target)).value, 'number')" />
+                </div>
+              } @else {
+                <label class="field-row">{{ field.label }}
+                  <input type="number" [min]="field.min" [max]="field.max" [value]="fieldValue(field.key)" (change)="patchField(field.key, ($any($event.target)).value, 'number')" />
+                </label>
+              }
+            }
+            @if (hardwareFields().length === 0) {
+              <p class="hardware-empty">No hardware controls for this type.</p>
+            }
+            @if ((project().chip === 'vectrex' || project().chip === 'atarist') && armed().kind === 'tone') {
+              <p class="hardware-hint">
+                @if (project().chip === 'vectrex') {
+                  Noise and hardware envelope need YM6 export; AKY is software tones only.
+                } @else {
+                  Noise and hardware envelope export via YM6.
+                }
+              </p>
+            }
+          </div>
+
+          @if (showFmOperators()) {
+            <div class="fm-operators">
+              <h3>Operators</h3>
+              <div class="fm-grid" role="table" aria-label="FM operators">
+                <div class="fm-grid-head" role="row">
+                  <span role="columnheader">Op</span>
+                  @for (column of operatorFields; track column.key) {
+                    <span role="columnheader" [title]="column.title">{{ column.label }}</span>
+                  }
+                </div>
+                @for (operator of fmOperators(); track operator.index) {
+                  <div class="fm-grid-row" role="row">
+                    <span
+                      class="fm-op-name"
+                      [class.fm-op-carrier]="operator.carrier"
+                      [title]="operator.carrier ? 'Carrier — reaches the output' : 'Modulator — bends ' + operator.modulates.join(', ')">
+                      {{ operator.label }}
+                      <small>{{ operator.carrier ? 'out' : operator.modulates.join('/') || '—' }}</small>
+                    </span>
+                    @for (column of operatorFields; track column.key) {
+                      <input
+                        type="number"
+                        class="fm-op-input"
+                        [attr.aria-label]="operator.label + ' ' + column.title"
+                        [title]="column.title"
+                        [min]="column.min"
+                        [max]="column.max"
+                        [value]="operatorValue(operator.index, column.key)"
+                        (input)="patchOperator(operator.index, column.key, ($any($event.target)).value, true)"
+                        (change)="patchOperator(operator.index, column.key, ($any($event.target)).value)" />
+                    }
+                  </div>
+                }
+              </div>
+              <p class="hardware-hint">
+                TL 0 is loudest. Carriers set the level you hear; modulators set the timbre.
+              </p>
+            </div>
+          }
+        </div>
+
+        <div class="instrument-modal-footer">
+          <button type="button" (click)="exportArmedInstrument()">Export instrument</button>
+          <button type="button" [disabled]="project().instruments.length <= 1" (click)="deleteArmed()">Remove</button>
+          <button type="button" class="btn-done" (click)="closeInstrumentEditor()">Done</button>
+        </div>
+      </div>
+    </div>
+  }
 
   @if (presetsOpen()) {
     <div class="preset-modal-layer">

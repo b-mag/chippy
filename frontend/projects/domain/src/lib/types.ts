@@ -13,7 +13,15 @@ export const LEGACY_PROJECT_VERSION = 1;
 /** Musical role used to group presets in the instrument studio. */
 export type PresetRole = 'lead' | 'bass' | 'percussion' | 'pad' | 'fx';
 
-export type ChipId = 'gameboy' | 'vectrex' | 'c64' | 'atarist' | 'nes';
+export type ChipId =
+  | 'gameboy'
+  | 'vectrex'
+  | 'c64'
+  | 'atarist'
+  | 'nes'
+  | 'genesis'
+  | 'pc98'
+  | 'x68000';
 
 export type ColumnId = 'note' | 'instrument' | 'volume' | 'effect';
 
@@ -34,7 +42,50 @@ export interface CellEffect {
   value: number;
 }
 
-export type InstrumentKind = 'pulse' | 'wave' | 'noise' | 'tone' | 'snip' | 'sid' | 'triangle';
+export type InstrumentKind = 'pulse' | 'wave' | 'noise' | 'tone' | 'snip' | 'sid' | 'triangle' | 'fm';
+
+/**
+ * One Yamaha-style four-operator slot (OPN / OPN2 / OPNA / OPM).
+ * Ranges follow the hardware registers so an exporter can map them later.
+ */
+export interface FmOperator {
+  /** Detune, 0-7. 0-3 detune up, 4-7 detune down. */
+  dt: number;
+  /** Frequency multiple, 0-15. 0 means one half. */
+  mul: number;
+  /** Total level, 0-127. 0 is loudest. */
+  tl: number;
+  /** Key scale / rate scaling, 0-3. */
+  ks: number;
+  /** Attack rate, 0-31. */
+  ar: number;
+  /** First decay rate, 0-31. */
+  dr: number;
+  /** Second decay (sustain) rate, 0-31. */
+  sr: number;
+  /** Release rate, 0-15. */
+  rr: number;
+  /** Sustain level, 0-15. 15 is near silence. */
+  sl: number;
+  /** SSG-EG mode, 0-15. 0 is off. OPN family only; OPM ignores it. */
+  ssgEg: number;
+}
+
+/** A four-operator FM voice: routing, feedback, LFO depth, and the operators. */
+export interface FmPatch {
+  /** Operator connection, 0-7. */
+  algorithm: number;
+  /** Operator 1 self-feedback, 0-7. */
+  feedback: number;
+  /** Amplitude modulation sensitivity, 0-3. */
+  ams: number;
+  /** Pitch modulation sensitivity, 0-7. */
+  pms: number;
+  lfoEnable: boolean;
+  /** LFO speed, 0-7. */
+  lfoFrequency: number;
+  operators: [FmOperator, FmOperator, FmOperator, FmOperator];
+}
 
 /** One step on one channel. Empty means the previous note keeps sounding. */
 export interface Cell {
@@ -124,7 +175,17 @@ export interface Instrument {
   filterResonance: number;
   /** 0 = low, 1 = band, 2 = high. */
   filterMode: 0 | 1 | 2;
+  /** Four-operator patch. Present on every instrument; only FM chips read it. */
+  fm: FmPatch;
 }
+
+/**
+ * Instrument overrides stored by a preset or an instrument file.
+ * The FM patch may be partial; defaults fill the rest in on load.
+ */
+export type InstrumentPatch = Partial<Omit<Instrument, 'fm'>> & {
+  fm?: Partial<Omit<FmPatch, 'operators'>> & { operators?: Partial<FmOperator>[] };
+};
 
 /** One song inside a project. Patterns and order live here; instruments do not. */
 export interface SongBody {
@@ -150,7 +211,7 @@ export interface CustomInstrumentPreset {
   kind: InstrumentKind;
   role: PresetRole;
   /** Field overrides applied on top of a fresh instrument of `kind`. */
-  patch: Partial<Instrument>;
+  patch: InstrumentPatch;
 }
 
 /**

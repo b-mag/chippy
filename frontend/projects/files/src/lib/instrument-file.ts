@@ -6,16 +6,19 @@ import {
   type CustomInstrumentPreset,
   type Instrument,
   type InstrumentKind,
+  type InstrumentPatch,
   type PresetRole,
 } from '@chippy/domain';
 
 const INSTRUMENT_FILE_VERSION = 1;
 const INSTRUMENT_FILE_TYPE = 'chippy-instrument';
 
-const CHIP_IDS: ChipId[] = ['gameboy', 'vectrex', 'c64', 'atarist', 'nes'];
+const CHIP_IDS: ChipId[] = [
+  'gameboy', 'vectrex', 'c64', 'atarist', 'nes', 'genesis', 'pc98', 'x68000',
+];
 const PRESET_ROLES = new Set<PresetRole>(['lead', 'bass', 'percussion', 'pad', 'fx']);
 const INSTRUMENT_KINDS = new Set<InstrumentKind>([
-  'pulse', 'wave', 'noise', 'tone', 'snip', 'sid', 'triangle',
+  'pulse', 'wave', 'noise', 'tone', 'snip', 'sid', 'triangle', 'fm',
 ]);
 
 export interface InstrumentFileDocument {
@@ -25,7 +28,7 @@ export interface InstrumentFileDocument {
   chip: ChipId;
   kind: InstrumentKind;
   role: PresetRole;
-  patch: Partial<Instrument>;
+  patch: InstrumentPatch;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -103,7 +106,7 @@ export function parseInstrumentFile(text: string): Omit<CustomInstrumentPreset, 
     : 'Imported';
   const patchRaw = isRecord(parsed['patch']) ? parsed['patch'] : {};
   const normalized = baseInstrument({
-    ...(patchRaw as Partial<Instrument>),
+    ...(patchRaw as InstrumentPatch),
     id: 'tmp',
     name: 'tmp',
     kind,

@@ -1,9 +1,13 @@
 import { chipDefinition } from '@chippy/domain';
 import {
   ayPeriod,
+  createFmSynthState,
+  isFmChipId,
   midiToHz,
   nesDutyFraction,
+  synthesizeFmSamples,
   type AyFrame,
+  type FmFrame,
   type GbFrame,
   type NesFrame,
   type RenderedSong,
@@ -56,10 +60,31 @@ function ayHardwareEnvelopeLevel(shape: number, phase: number): number {
   return attack ? step / 15 : (15 - step) / 15;
 }
 
+/**
+ * Four-operator chips run the same synth as live playback, so the WAV matches
+ * what the tracker plays back.
+ */
+function renderFmPcm(frames: FmFrame[], samplesPerFrame: number, output: Int16Array): Int16Array {
+  const channelCount = frames[0]?.channels.length ?? 0;
+  if (channelCount === 0) {
+    return output;
+  }
+  const state = createFmSynthState(channelCount, SAMPLE_RATE);
+  const buffer = new Float32Array(frames.length * samplesPerFrame);
+  synthesizeFmSamples(state, frames, samplesPerFrame, buffer);
+  for (let index = 0; index < buffer.length; index += 1) {
+    output[index] = Math.round(Math.max(-1, Math.min(1, buffer[index])) * 32767);
+  }
+  return output;
+}
+
 /** Mix rendered frames down to 16-bit mono PCM. This path does not use Web Audio. */
 export function renderPcm(rendered: RenderedSong): Int16Array {
   const samplesPerFrame = Math.round(SAMPLE_RATE / rendered.frameRate);
   const output = new Int16Array(rendered.frames.length * samplesPerFrame);
+  if (isFmChipId(rendered.chip)) {
+    return renderFmPcm(rendered.frames as FmFrame[], samplesPerFrame, output);
+  }
   const phases = [0, 0, 0, 0];
   let noise = 1;
   let filterLp = 0;

@@ -7,9 +7,15 @@ import {
   type Song,
 } from '@chippy/domain';
 import {
+  createFmSynthState,
+  isFmChipId,
+  isFmRender,
   renderSong,
+  synthesizeFmSamples,
   WAVEFORMS,
   type AyFrame,
+  type FmFrame,
+  type FmSynthState,
   type GbFrame,
   type NesFrame,
   type RenderedSong,
@@ -53,6 +59,15 @@ export class PlaybackService {
   private envShape = 0x0e;
   private envPeriod = 0x1000;
   private envClock = 0;
+  /**
+   * Four-operator chips are synthesized into short buffers instead of driven
+   * through oscillator nodes. The state carries operator phase across rows so
+   * held notes do not click at row boundaries.
+   */
+  private fmState: FmSynthState | null = null;
+  private fmGain: GainNode | null = null;
+  private fmSources: AudioBufferSourceNode[] = [];
+  private fmNextTime = 0;
 
   /**
    * Play a short engine-rendered one-shot of the armed instrument at `midi`.
@@ -90,6 +105,12 @@ export class PlaybackService {
     this.prepareVoices(context, channelCount);
     window.clearInterval(this.auditionTimer);
     const framesToPlay = Math.min(rendered.frames.length, rendered.framesPerRow * 5);
+    if (isFmRender(rendered)) {
+      this.stopFmSources();
+      this.fmState = createFmSynthState(channelCount, context.sampleRate);
+      this.scheduleFm(rendered.frames.slice(0, framesToPlay), rendered.frameRate, () => true);
+      return;
+    }
     let index = 0;
     const emptyMute = new Set<number>();
     const emptySolo = new Set<number>();
@@ -142,7 +163,11 @@ export class PlaybackService {
     this.stop();
     this.rendered = renderSong(song);
     const context = this.ensure();
-    this.prepareVoices(context, chipDefinition(song.chip).channels.length);
+    const channelCount = chipDefinition(song.chip).channels.length;
+    this.prepareVoices(context, channelCount);
+    this.fmState = isFmChipId(song.chip)
+      ? createFmSynthState(channelCount, context.sampleRate)
+      : null;
     this.playOrderIndex = orderIndex;
     this.loopMode = loop;
     this.mutedChannels = new Set(muted);
@@ -172,7 +197,17 @@ export class PlaybackService {
         ? this.playOrderIndex * PATTERN_ROWS + localRow
         : this.absoluteRow % this.songRows;
       const frameIndex = Math.min(rendered.frames.length - 1, frameRow * rendered.framesPerRow);
-      this.applyFrame(rendered.chip, rendered.frames[frameIndex], this.mutedChannels, this.soloChannels);
+      if (isFmRender(rendered)) {
+        const muted = this.mutedChannels;
+        const solo = this.soloChannels;
+        this.scheduleFm(
+          rendered.frames.slice(frameIndex, frameIndex + rendered.framesPerRow),
+          rendered.frameRate,
+          (channel) => (solo.size > 0 ? solo.has(channel) : !muted.has(channel)),
+        );
+      } else {
+        this.applyFrame(rendered.chip, rendered.frames[frameIndex], this.mutedChannels, this.soloChannels);
+      }
       this.row.set(localRow);
       this.orderIndex.set(localOrder);
       this.tick.set({ orderIndex: localOrder, row: localRow });
@@ -191,6 +226,52 @@ export class PlaybackService {
     if (this.waveGain) {
       this.waveGain.gain.value = 0;
     }
+    this.stopFmSources();
+  }
+
+  private stopFmSources(): void {
+    this.fmSources.forEach((source) => {
+      try { source.stop(); } catch { /* already stopped */ }
+      source.disconnect();
+    });
+    this.fmSources = [];
+    this.fmNextTime = 0;
+  }
+
+  private ensureFmGain(context: AudioContext): GainNode {
+    if (!this.fmGain) {
+      this.fmGain = context.createGain();
+      this.fmGain.gain.value = 0.9;
+      this.fmGain.connect(context.destination);
+    }
+    return this.fmGain;
+  }
+
+  /**
+   * Synthesize a span of FM frames and queue it right after whatever is already
+   * scheduled, so consecutive rows join without a gap.
+   */
+  private scheduleFm(frames: FmFrame[], frameRate: number, audible: (channel: number) => boolean): void {
+    const state = this.fmState;
+    if (!state || frames.length === 0) {
+      return;
+    }
+    const context = this.ensure();
+    const samplesPerFrame = Math.round(context.sampleRate / frameRate);
+    const buffer = context.createBuffer(1, frames.length * samplesPerFrame, context.sampleRate);
+    synthesizeFmSamples(state, frames, samplesPerFrame, buffer.getChannelData(0), audible);
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(this.ensureFmGain(context));
+    // A short lead on the first block absorbs timer jitter without audible lag.
+    const when = Math.max(context.currentTime + 0.02, this.fmNextTime);
+    source.start(when);
+    this.fmNextTime = when + buffer.duration;
+    this.fmSources.push(source);
+    source.onended = () => {
+      this.fmSources = this.fmSources.filter((item) => item !== source);
+      source.disconnect();
+    };
   }
 
   private ensure(): AudioContext {

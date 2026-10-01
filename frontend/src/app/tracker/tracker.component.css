@@ -212,11 +212,16 @@
   line-height: 1.2;
 }
 
+/*
+ * One track per channel, floored at the width of the four cells, so the header
+ * and the rows stay aligned and wide chips scroll instead of crushing columns.
+ */
 .grid-head, .grid-row {
   display: grid;
-  grid-template-columns: 2rem repeat(auto-fit, minmax(0, 1fr));
+  grid-template-columns: 2rem repeat(var(--channels, 4), minmax(11.25rem, 1fr));
   gap: 6px;
   align-items: center;
+  min-width: max-content;
 }
 
 .channel-head {
@@ -255,6 +260,23 @@
   font-size: 0.75rem;
   color: var(--muted);
   font-family: ui-monospace, monospace;
+}
+
+.channel-head.channel-placeholder .channel-title {
+  color: var(--muted);
+}
+
+.channel-soon {
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-style: italic;
+  line-height: 1.2;
+}
+
+.channel-cells.channel-placeholder .cell {
+  opacity: 0.35;
+  cursor: not-allowed;
+  background: color-mix(in srgb, var(--cell) 70%, transparent);
 }
 
 .studio-hardware {
@@ -411,15 +433,137 @@
   min-height: 2.25rem;
 }
 
-.instrument-editor {
+.instrument-hint {
+  margin: 0 0 8px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  line-height: 1.3;
+}
+
+.instrument-modal {
+  width: min(56rem, calc(100vw - 32px));
+  max-height: min(44rem, calc(100vh - 32px));
+}
+
+.instrument-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: 4px;
+}
+
+.instrument-modal .studio-hardware {
+  max-height: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 8px 18px;
+  align-items: center;
+}
+
+.instrument-modal .studio-hardware h3,
+.instrument-modal .studio-hardware .hardware-empty,
+.instrument-modal .studio-hardware .hardware-hint {
+  grid-column: 1 / -1;
+}
+
+.instrument-identity {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.instrument-identity label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  min-width: 0;
+}
+
+.instrument-modal-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--cell-edge);
+}
+
+.instrument-modal-footer .btn-done {
+  margin-left: auto;
+  font-weight: 600;
+}
+
+.fm-operators {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  flex: 0 0 auto;
-  min-width: 0;
-  margin-bottom: 4px;
-  padding-top: 8px;
+  padding-top: 10px;
   border-top: 1px solid var(--cell-edge);
+}
+
+.fm-operators h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.fm-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-x: auto;
+}
+
+.fm-grid-head,
+.fm-grid-row {
+  display: grid;
+  grid-template-columns: 5.5rem repeat(10, minmax(3.1rem, 1fr));
+  gap: 4px;
+  align-items: center;
+  min-width: max-content;
+}
+
+.fm-grid-head span {
+  font-size: 0.7rem;
+  font-family: ui-monospace, monospace;
+  color: var(--muted);
+  text-align: center;
+}
+
+.fm-grid-head span:first-child {
+  text-align: left;
+}
+
+.fm-op-name {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.fm-op-name small {
+  font-size: 0.65rem;
+  font-weight: 400;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+}
+
+.fm-op-name.fm-op-carrier small {
+  color: var(--cursor);
+}
+
+.fm-op-input {
+  width: 100%;
+  min-width: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  text-align: center;
+  padding-inline: 2px;
 }
 
 .audition-strip {

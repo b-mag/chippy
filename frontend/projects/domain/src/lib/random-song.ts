@@ -71,7 +71,9 @@ export function fillPatternRandom(
       if (random() > 0.55) {
         continue;
       }
-      const note = pitches[Math.floor(random() * pitches.length)] - channel * 12;
+      // Wrap the per-channel octave drop so wide chips (8 FM channels) stay in a playable range.
+      const octave = channel <= 4 ? channel : channel % 5;
+      const note = pitches[Math.floor(random() * pitches.length)] - octave * 12;
       pattern.rows[row][channel] = {
         note,
         cut: false,

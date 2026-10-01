@@ -1,7 +1,11 @@
-import type { ChipId, Instrument, InstrumentKind } from './types';
+import { FM_ALGORITHM_OPTIONS, mergeFmPatch, type FmPatchFieldKey } from './fm';
+import type { ChipId, Instrument, InstrumentKind, InstrumentPatch } from './types';
+
+/** Either a flat instrument property or a dotted FM patch field. */
+export type InstrumentFieldKey = keyof Instrument | FmPatchFieldKey;
 
 export interface InstrumentField {
-  key: keyof Instrument;
+  key: InstrumentFieldKey;
   label: string;
   /** knob = rotary + linked number; macro = space-separated step list. */
   control: 'select' | 'number' | 'toggle' | 'knob' | 'macro';
@@ -18,6 +22,13 @@ export interface ChipChannel {
   label: string;
   /** Short alias shown beside the label when useful (e.g. PU1). */
   alias?: string;
+  /**
+   * Hardware this chip has but Chippy does not drive yet. The column is shown
+   * so the layout matches the real chip, but it takes no notes and makes no sound.
+   */
+  placeholder?: boolean;
+  /** Why the column is inert, shown as a tooltip. */
+  placeholderNote?: string;
 }
 
 export interface ChipDefinition {
@@ -65,7 +76,8 @@ const ayEnvelopeShapes = [
   { value: 0x0f, label: 'Rise then low' },
 ];
 
-function baseInstrument(partial: Partial<Instrument> & Pick<Instrument, 'id' | 'name' | 'kind'>): Instrument {
+function baseInstrument(partial: InstrumentPatch & Pick<Instrument, 'id' | 'name' | 'kind'>): Instrument {
+  const { fm, ...rest } = partial;
   return {
     duty: 2,
     envelopeStart: 12,
@@ -100,7 +112,9 @@ function baseInstrument(partial: Partial<Instrument> & Pick<Instrument, 'id' | '
     filterCutoff: 1024,
     filterResonance: 8,
     filterMode: 0,
-    ...partial,
+    ...rest,
+    // Presets and loaded files may carry a partial patch; fill the rest in.
+    fm: mergeFmPatch(fm),
   };
 }
 
@@ -371,14 +385,150 @@ const nes: ChipDefinition = {
   },
 };
 
-const chips: Record<ChipId, ChipDefinition> = { gameboy, vectrex, c64, atarist, nes };
+/**
+ * Shared four-operator controls. The operator grid itself is driven by
+ * `FM_OPERATOR_FIELDS`, so only the channel-wide values live here.
+ */
+const fmFields: InstrumentField[] = [
+  { key: 'fm.algorithm', label: 'Algorithm', control: 'select', options: FM_ALGORITHM_OPTIONS, kinds: ['fm'] },
+  { key: 'fm.feedback', label: 'Feedback', control: 'knob', min: 0, max: 7, kinds: ['fm'] },
+  { key: 'fm.lfoEnable', label: 'LFO', control: 'toggle', kinds: ['fm'] },
+  { key: 'fm.lfoFrequency', label: 'LFO speed', control: 'knob', min: 0, max: 7, kinds: ['fm'] },
+  { key: 'fm.ams', label: 'AMS depth', control: 'knob', min: 0, max: 3, kinds: ['fm'] },
+  { key: 'fm.pms', label: 'PMS depth', control: 'knob', min: 0, max: 7, kinds: ['fm'] },
+  { key: 'volumeMacro', label: 'Volume macro', control: 'macro', min: 0, max: 15, kinds: ['fm'] },
+  { key: 'pitchMacro', label: 'Pitch macro', control: 'macro', min: -24, max: 24, kinds: ['fm'] },
+];
+
+function fmInstrument(name: string): Instrument {
+  return baseInstrument({ id: 'ins-1', name, kind: 'fm', envelopeStart: 15 });
+}
+
+function fmChannels(count: number): ChipChannel[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `fm${index + 1}`,
+    label: `FM ${index + 1}`,
+    alias: `FM${index + 1}`,
+  }));
+}
+
+function placeholderChannel(id: string, label: string, alias: string, note: string): ChipChannel {
+  return { id, label, alias, placeholder: true, placeholderNote: note };
+}
+
+/** Shared factory for the three four-operator chips. */
+function fmChipDefinition(options: {
+  id: ChipId;
+  label: string;
+  clockHz: number;
+  fmChannelCount: number;
+  defaultName: string;
+  placeholders: ChipChannel[];
+}): ChipDefinition {
+  const channels = [...fmChannels(options.fmChannelCount), ...options.placeholders];
+  return {
+    id: options.id,
+    label: options.label,
+    clockHz: options.clockHz,
+    frameRate: 60,
+    channels,
+    kinds: ['fm'],
+    fields: fmFields,
+    createDefaultInstrument() {
+      return fmInstrument(options.defaultName);
+    },
+    createInstrument(kind: InstrumentKind) {
+      if (!this.kinds.includes(kind)) {
+        return this.createDefaultInstrument();
+      }
+      return fmInstrument(options.defaultName);
+    },
+    kindsForChannel(channelId: string) {
+      const channel = channels.find((item) => item.id === channelId);
+      if (!channel || channel.placeholder) {
+        return [];
+      }
+      return ['fm'];
+    },
+  };
+}
+
+const genesis: ChipDefinition = fmChipDefinition({
+  id: 'genesis',
+  label: 'Sega Genesis',
+  /** YM2612 on an NTSC Mega Drive runs at the 53.693175 MHz master clock / 7. */
+  clockHz: 7_670_453,
+  fmChannelCount: 6,
+  defaultName: 'FM lead',
+  placeholders: [
+    placeholderChannel('psg1', 'PSG 1', 'PSG1', 'SN76489 PSG is not driven yet.'),
+    placeholderChannel('psg2', 'PSG 2', 'PSG2', 'SN76489 PSG is not driven yet.'),
+    placeholderChannel('psg3', 'PSG 3', 'PSG3', 'SN76489 PSG is not driven yet.'),
+    placeholderChannel('psgnoise', 'PSG Noise', 'NOI', 'SN76489 noise is not driven yet.'),
+  ],
+});
+
+const pc98: ChipDefinition = fmChipDefinition({
+  id: 'pc98',
+  label: 'NEC PC-98',
+  /** YM2608 (OPNA) on a PC-9801 sound board is clocked at 7.987200 MHz. */
+  clockHz: 7_987_200,
+  fmChannelCount: 6,
+  defaultName: 'OPNA lead',
+  placeholders: [
+    placeholderChannel('ssg1', 'SSG 1', 'SSG1', 'OPNA SSG is not driven yet.'),
+    placeholderChannel('ssg2', 'SSG 2', 'SSG2', 'OPNA SSG is not driven yet.'),
+    placeholderChannel('ssg3', 'SSG 3', 'SSG3', 'OPNA SSG is not driven yet.'),
+    placeholderChannel('rhythm', 'Rhythm', 'RHY', 'OPNA rhythm samples are not driven yet.'),
+    placeholderChannel('adpcm', 'ADPCM', 'PCM', 'OPNA ADPCM is not driven yet.'),
+  ],
+});
+
+const x68000: ChipDefinition = fmChipDefinition({
+  id: 'x68000',
+  label: 'Sharp X68000',
+  /** YM2151 (OPM) in an X68000 is clocked at 4 MHz. */
+  clockHz: 4_000_000,
+  fmChannelCount: 8,
+  defaultName: 'OPM lead',
+  placeholders: [
+    placeholderChannel('adpcm', 'ADPCM', 'PCM', 'MSM6258 ADPCM is not driven yet.'),
+  ],
+});
+
+const chips: Record<ChipId, ChipDefinition> = {
+  gameboy,
+  vectrex,
+  c64,
+  atarist,
+  nes,
+  genesis,
+  pc98,
+  x68000,
+};
+
+/** Chips whose voices come from the four-operator soft FM engine. */
+const FM_CHIPS: ChipId[] = ['genesis', 'pc98', 'x68000'];
+
+export function isFmChip(id: ChipId): boolean {
+  return FM_CHIPS.includes(id);
+}
 
 export function chipDefinition(id: ChipId): ChipDefinition {
   return chips[id];
 }
 
 export function chipIds(): ChipId[] {
-  return ['gameboy', 'vectrex', 'c64', 'atarist', 'nes'];
+  return ['gameboy', 'vectrex', 'c64', 'atarist', 'nes', 'genesis', 'pc98', 'x68000'];
+}
+
+export function isChipId(value: unknown): value is ChipId {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(chips, value);
+}
+
+/** Whether the column exists on the hardware but Chippy cannot play it yet. */
+export function channelIsPlaceholder(chip: ChipId, channelIndex: number): boolean {
+  return chipDefinition(chip).channels[channelIndex]?.placeholder === true;
 }
 
 export function chipLabel(id: ChipId): string {

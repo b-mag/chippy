@@ -11,17 +11,20 @@ import {
   type EffectCmd,
   type Instrument,
   type InstrumentKind,
+  type InstrumentPatch,
   type Pattern,
   type PresetRole,
   type Project,
   type SongBody,
 } from '@chippy/domain';
 
-const CHIP_IDS: ChipId[] = ['gameboy', 'vectrex', 'c64', 'atarist', 'nes'];
+const CHIP_IDS: ChipId[] = [
+  'gameboy', 'vectrex', 'c64', 'atarist', 'nes', 'genesis', 'pc98', 'x68000',
+];
 const EFFECT_CMDS = new Set<EffectCmd>(['A', 'U', 'D', 'R', 'C', 'P']);
 const PRESET_ROLES = new Set<PresetRole>(['lead', 'bass', 'percussion', 'pad', 'fx']);
 const INSTRUMENT_KINDS = new Set<InstrumentKind>([
-  'pulse', 'wave', 'noise', 'tone', 'snip', 'sid', 'triangle',
+  'pulse', 'wave', 'noise', 'tone', 'snip', 'sid', 'triangle', 'fm',
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -50,7 +53,7 @@ function normalizeInstrument(raw: unknown, index: number): Instrument {
   const id = typeof raw['id'] === 'string' && raw['id'] ? String(raw['id']) : `ins-${index + 1}`;
   const name = typeof raw['name'] === 'string' && raw['name'] ? String(raw['name']) : `Instrument ${index + 1}`;
   return baseInstrument({
-    ...(raw as Partial<Instrument>),
+    ...(raw as InstrumentPatch),
     id,
     name,
     kind,

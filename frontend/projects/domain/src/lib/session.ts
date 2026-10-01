@@ -1,4 +1,10 @@
-import { baseInstrument, chipDefinition, instrumentForChannel, kindAllowedOnChannel } from './chips';
+import {
+  baseInstrument,
+  channelIsPlaceholder,
+  chipDefinition,
+  instrumentForChannel,
+  kindAllowedOnChannel,
+} from './chips';
 import {
   defaultRoleForKind,
   instrumentFromPreset,
@@ -236,6 +242,9 @@ function writePattern(body: SongBody, pattern: Pattern): SongBody {
 }
 
 function writeCell(state: SessionState, cell: Cell, advance: boolean): SessionState {
+  if (channelIsPlaceholder(state.project.chip, state.cursor.channel)) {
+    return state;
+  }
   const next = mutateActiveSong(state, (body) => {
     const pattern = currentPattern(body, state.cursor);
     const rows = pattern.rows.map((row) => row.map((item) => ({ ...item })));
@@ -279,6 +288,9 @@ function resolveInstrumentForCursor(state: SessionState): { state: SessionState;
 
 /** Write a note with a channel-compatible instrument, and move down one row. */
 export function enterNote(state: SessionState, midi: number): SessionState {
+  if (channelIsPlaceholder(state.project.chip, state.cursor.channel)) {
+    return state;
+  }
   const resolved = resolveInstrumentForCursor(state);
   state = resolved.state;
   const body = activeSongBody(state.project);
@@ -640,7 +652,9 @@ export function addInstrument(state: SessionState, kind?: InstrumentKind): Sessi
   const project = cloneProject(state.project);
   const definition = chipDefinition(project.chip);
   const channel = definition.channels[state.cursor.channel];
-  const allowed = channel ? definition.kindsForChannel(channel.id) : definition.kinds;
+  const forChannel = channel ? definition.kindsForChannel(channel.id) : [];
+  // A placeholder column offers no kinds; fall back to everything the chip makes.
+  const allowed = forChannel.length > 0 ? forChannel : definition.kinds;
   const chosen = kind && allowed.includes(kind) ? kind : allowed[0];
   const created = definition.createInstrument(chosen);
   const id = nextInstrumentId(project);

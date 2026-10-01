@@ -1,4 +1,14 @@
-import { chipDefinition, type Cell, type CellEffect, type Instrument, type Song } from '@chippy/domain';
+import {
+  chipDefinition,
+  isFmChip,
+  mergeFmPatch,
+  type Cell,
+  type CellEffect,
+  type ChipId,
+  type Instrument,
+  type Song,
+} from '@chippy/domain';
+import { emptyFmFrame, softFmVoiceFrame, type FmFrame, type SoftFmChannelParams } from './soft-fm';
 import { emptyNesFrame, softNesChannelFrame, type NesFrame, type SoftNesChannelParams } from './soft-nes';
 import { emptySidFrame, softSidVoiceFrame, type SidFrame, type SoftSidVoiceParams } from './soft-sid';
 import { ayPeriod, framesPerRow, gbFrequency } from './timing';
@@ -28,16 +38,31 @@ export interface GbFrame {
 
 export type { SidFrame };
 export type { NesFrame };
+export type { FmFrame };
+
+/** The three four-operator chips share one rendered shape. */
+export type FmChipId = 'genesis' | 'pc98' | 'x68000';
 
 export type RenderedSong =
   | { chip: 'vectrex'; frameRate: number; framesPerRow: number; frames: AyFrame[] }
   | { chip: 'atarist'; frameRate: number; framesPerRow: number; frames: AyFrame[] }
   | { chip: 'gameboy'; frameRate: number; framesPerRow: number; frames: GbFrame[] }
   | { chip: 'c64'; frameRate: number; framesPerRow: number; frames: SidFrame[] }
-  | { chip: 'nes'; frameRate: number; framesPerRow: number; frames: NesFrame[] };
+  | { chip: 'nes'; frameRate: number; framesPerRow: number; frames: NesFrame[] }
+  | { chip: FmChipId; frameRate: number; framesPerRow: number; frames: FmFrame[] };
 
 function isAyChip(chip: Song['chip']): chip is 'vectrex' | 'atarist' {
   return chip === 'vectrex' || chip === 'atarist';
+}
+
+export function isFmChipId(chip: ChipId): chip is FmChipId {
+  return isFmChip(chip);
+}
+
+export type FmRenderedSong = Extract<RenderedSong, { chip: FmChipId }>;
+
+export function isFmRender(rendered: RenderedSong): rendered is FmRenderedSong {
+  return isFmChip(rendered.chip);
 }
 
 /** Four built-in 32-sample waveforms. Values are 4-bit, 0 through 15. */
@@ -447,12 +472,35 @@ function nesFrame(song: Song, voices: Voice[]): NesFrame {
   return frame;
 }
 
+function fmParamsFromVoice(song: Song, voice: Voice, frameRate: number): SoftFmChannelParams {
+  const instrument = instrumentOf(song, voice.instrumentId);
+  return {
+    midi: soundingMidi(voice),
+    active: voice.active,
+    patch: mergeFmPatch(instrument?.fm),
+    volume: voice.volume ?? instrument?.envelopeStart ?? 15,
+    volumeMacro: instrument?.volumeMacro ?? null,
+    pitchMacro: instrument?.pitchMacro ?? null,
+    gateAge: voice.gateAge,
+    gated: voice.gated,
+    frameRate,
+  };
+}
+
+function fmFrame(song: Song, voices: Voice[], frameRate: number): FmFrame {
+  const frame = emptyFmFrame(voices.length);
+  for (let channel = 0; channel < voices.length; channel += 1) {
+    frame.channels[channel] = softFmVoiceFrame(fmParamsFromVoice(song, voices[channel], frameRate));
+  }
+  return frame;
+}
+
 /** Render the whole order list to register frames. Muted channels are applied later, at playback. */
 export function renderSong(song: Song): RenderedSong {
   const definition = chipDefinition(song.chip);
   const perRow = framesPerRow(song.tempo, definition.frameRate);
   const voices = silentVoices(definition.channels.length);
-  const frames: AyFrame[] | GbFrame[] | SidFrame[] | NesFrame[] = [];
+  const frames: AyFrame[] | GbFrame[] | SidFrame[] | NesFrame[] | FmFrame[] = [];
   for (const patternId of song.order) {
     const pattern = song.patterns.find((item) => item.id === patternId);
     if (!pattern) {
@@ -468,6 +516,8 @@ export function renderSong(song: Song): RenderedSong {
           (frames as SidFrame[]).push(sidFrame(song, voices));
         } else if (song.chip === 'nes') {
           (frames as NesFrame[]).push(nesFrame(song, voices));
+        } else if (isFmChipId(song.chip)) {
+          (frames as FmFrame[]).push(fmFrame(song, voices, definition.frameRate));
         } else {
           (frames as GbFrame[]).push(gbFrame(song, voices));
         }
@@ -485,6 +535,14 @@ export function renderSong(song: Song): RenderedSong {
   }
   if (song.chip === 'nes') {
     return { chip: 'nes', frameRate: definition.frameRate, framesPerRow: perRow, frames: frames as NesFrame[] };
+  }
+  if (isFmChipId(song.chip)) {
+    return {
+      chip: song.chip,
+      frameRate: definition.frameRate,
+      framesPerRow: perRow,
+      frames: frames as FmFrame[],
+    };
   }
   return { chip: 'gameboy', frameRate: definition.frameRate, framesPerRow: perRow, frames: frames as GbFrame[] };
 }
