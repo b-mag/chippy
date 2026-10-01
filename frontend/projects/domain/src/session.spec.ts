@@ -44,6 +44,7 @@ import {
   renameInstrument,
   renamePattern,
   reorderOrder,
+  importCustomPreset,
   saveCustomPreset,
   selectOrder,
   selectSong,
@@ -259,6 +260,30 @@ describe('session editing', () => {
     expect(patch).not.toHaveProperty('name');
     state = saveCustomPreset(state, '   ');
     expect(state.project.customPresets[0].name.length).toBeGreaterThan(0);
+  });
+
+  it('imports an external custom preset into the bank when the chip matches', () => {
+    let state = newSession('nes');
+    const before = state.project.instruments.length;
+    state = importCustomPreset(state, {
+      name: 'Friend lead',
+      chip: 'nes',
+      kind: 'pulse',
+      role: 'lead',
+      patch: { duty: 2, envelopeStart: 12 },
+    });
+    expect(state.project.customPresets).toHaveLength(1);
+    expect(state.project.customPresets[0].name).toBe('Friend lead');
+    expect(state.project.instruments.length).toBe(before + 1);
+    expect(state.project.instruments.some((item) => item.name === 'Friend lead')).toBe(true);
+    const rejected = importCustomPreset(state, {
+      name: 'GB only',
+      chip: 'gameboy',
+      kind: 'pulse',
+      role: 'lead',
+      patch: {},
+    });
+    expect(rejected).toBe(state);
   });
 
   it('keeps Pattern N and duplicate suffixes stable across add and copy', () => {

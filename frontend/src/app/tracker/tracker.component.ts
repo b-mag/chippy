@@ -32,7 +32,6 @@ import {
   type InstrumentKind,
   type InstrumentPreset,
   type PresetMenuEntry,
-  type PresetRole,
   type Project,
 } from '@chippy/domain';
 import { PlaybackService, type LoopMode } from '../playback.service';
@@ -57,6 +56,8 @@ export class TrackerComponent {
   private readonly renameInput = viewChild<ElementRef<HTMLInputElement>>('renameInput');
   private readonly instrumentRenameInput = viewChild<ElementRef<HTMLInputElement>>('instrumentRenameInput');
   private readonly openProjectInput = viewChild<ElementRef<HTMLInputElement>>('openProjectInput');
+  private readonly importInstrumentInput = viewChild<ElementRef<HTMLInputElement>>('importInstrumentInput');
+  private readonly presetSearchInput = viewChild<ElementRef<HTMLInputElement>>('presetSearchInput');
 
   readonly state = this.session.state;
   readonly playRow = this.playback.row;
@@ -73,6 +74,7 @@ export class TrackerComponent {
   readonly solo = signal<ReadonlySet<number>>(new Set());
   readonly exportOpen = signal(false);
   readonly presetsOpen = signal(false);
+  readonly presetSearch = signal('');
   /** Bumps when a chip switch is cancelled so the select rebinds to the current chip. */
   readonly chipSelectEpoch = signal(0);
   readonly renamingId = signal<string | null>(null);
@@ -156,8 +158,25 @@ export class TrackerComponent {
   readonly presetGroups = computed(() =>
     groupPresetsForMenu(this.project().chip, this.project().customPresets ?? []),
   );
+  readonly filteredPresetGroups = computed(() => {
+    const query = this.presetSearch().trim().toLowerCase();
+    const groups = this.presetGroups();
+    if (!query) {
+      return groups;
+    }
+    return groups
+      .map((roleGroup) => ({
+        ...roleGroup,
+        kinds: roleGroup.kinds
+          .map((kindGroup) => ({
+            ...kindGroup,
+            entries: kindGroup.entries.filter((entry) => entry.name.toLowerCase().includes(query)),
+          }))
+          .filter((kindGroup) => kindGroup.entries.length > 0),
+      }))
+      .filter((roleGroup) => roleGroup.kinds.length > 0);
+  });
   readonly premiumUnlocked = computed(() => this.entitlement.canUsePremiumPresets());
-  readonly customPresetRoles: PresetRole[] = ['lead', 'bass', 'percussion', 'pad', 'fx'];
   readonly showSnip = computed(() => {
     const chip = this.project().chip;
     return chip === 'vectrex' || chip === 'atarist';
@@ -202,6 +221,11 @@ export class TrackerComponent {
     effect(() => {
       if (this.renamingInstrumentId() && this.instrumentRenameInput()) {
         queueMicrotask(() => this.instrumentRenameInput()?.nativeElement.focus());
+      }
+    });
+    effect(() => {
+      if (this.presetsOpen() && this.presetSearchInput()) {
+        queueMicrotask(() => this.presetSearchInput()?.nativeElement.focus());
       }
     });
   }
@@ -706,6 +730,17 @@ export class TrackerComponent {
     }
   }
 
+  @HostListener('document:keydown.escape')
+  onDocumentEscape(): void {
+    if (this.presetsOpen()) {
+      this.closePresetsModal();
+      return;
+    }
+    if (this.exportOpen()) {
+      this.exportOpen.set(false);
+    }
+  }
+
   async exportFile(kind: 'wav' | 'ym' | 'vgm' | 'aky'): Promise<void> {
     this.exportOpen.set(false);
     try {
@@ -800,6 +835,17 @@ export class TrackerComponent {
     );
   }
 
+  openPresetsModal(): void {
+    this.presetSearch.set('');
+    this.presetStatus.set('');
+    this.presetsOpen.set(true);
+  }
+
+  closePresetsModal(): void {
+    this.presetsOpen.set(false);
+    this.presetSearch.set('');
+  }
+
   addPresetEntry(entry: PresetMenuEntry): void {
     if (entry.custom) {
       this.session.addFromCustomPreset(entry.id);
@@ -809,30 +855,71 @@ export class TrackerComponent {
     } else {
       this.session.addFromPreset(entry.source as InstrumentPreset);
     }
-    this.presetsOpen.set(false);
-    this.presetStatus.set(`Added ${entry.name}.`);
+    this.closePresetsModal();
+    this.status.set(`Added ${entry.name}.`);
     this.auditionMidi(this.lastAuditionMidi());
   }
 
-  saveArmedAsCustom(): void {
-    const name = window.prompt('Custom preset name', this.armed().name);
-    if (name === null) {
-      return;
-    }
-    const defaultRole = defaultRoleForKind(this.armed().kind);
-    const roleRaw = window.prompt(
-      `Role (${this.customPresetRoles.join(', ')})`,
-      defaultRole,
+  async exportArmedInstrument(): Promise<void> {
+    const { serializeInstrumentFile, instrumentDownloadName } = await import('@chippy/files');
+    const instrument = this.armed();
+    const text = serializeInstrumentFile(
+      instrument,
+      this.project().chip,
+      defaultRoleForKind(instrument.kind),
     );
-    if (roleRaw === null) {
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = instrumentDownloadName(instrument.name);
+    link.click();
+    URL.revokeObjectURL(url);
+    this.status.set(`Exported “${instrument.name}”.`);
+  }
+
+  pickImportInstrument(): void {
+    const input = this.importInstrumentInput()?.nativeElement;
+    if (!input) {
       return;
     }
-    const role = this.customPresetRoles.includes(roleRaw as PresetRole)
-      ? (roleRaw as PresetRole)
-      : defaultRole;
-    this.session.saveCustomPreset(name, role);
-    this.presetsOpen.set(true);
-    this.presetStatus.set(`Saved custom preset “${name.trim() || this.armed().name}”.`);
+    input.value = '';
+    input.click();
+  }
+
+  onImportInstrumentSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) {
+      return;
+    }
+    void this.importInstrumentFile(file);
+  }
+
+  private async importInstrumentFile(file: File): Promise<void> {
+    try {
+      const { parseInstrumentFile } = await import('@chippy/files');
+      const text = await file.text();
+      const preset = parseInstrumentFile(text);
+      if (preset.chip !== this.project().chip) {
+        this.status.set(
+          `That instrument is for ${preset.chip}, but this project is ${this.project().chip}.`,
+        );
+        return;
+      }
+      const before = this.project().customPresets?.length ?? 0;
+      this.session.importCustomPreset(preset);
+      const after = this.project().customPresets?.length ?? 0;
+      if (after <= before) {
+        this.status.set('Could not import that instrument.');
+        return;
+      }
+      this.status.set(`Imported “${preset.name}”.`);
+      this.auditionMidi(this.lastAuditionMidi());
+    } catch (error) {
+      this.status.set(error instanceof Error ? error.message : 'That instrument file was rejected.');
+    }
   }
 
   removeCustomEntry(entry: PresetMenuEntry, event: Event): void {

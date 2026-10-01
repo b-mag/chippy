@@ -273,16 +273,46 @@
 
     <div class="instrument-actions">
       <button type="button" (click)="session.addInstrument()">Add instrument</button>
-      <button type="button" (click)="presetsOpen.set(!presetsOpen())">Add from presets…</button>
-      <button type="button" (click)="saveArmedAsCustom()">Save as custom…</button>
-      <button type="button" [disabled]="project().instruments.length <= 1" (click)="deleteArmed()">Delete instrument</button>
+      <button type="button" (click)="openPresetsModal()">Add from presets…</button>
+      <button type="button" (click)="pickImportInstrument()">Import instrument…</button>
+      <input
+        #importInstrumentInput
+        class="open-project-input"
+        type="file"
+        accept=".chippy-instrument.json,.json,application/json"
+        (change)="onImportInstrumentSelected($event)" />
+      <button type="button" (click)="exportArmedInstrument()">Export instrument</button>
+      <button type="button" [disabled]="project().instruments.length <= 1" (click)="deleteArmed()">Remove instrument</button>
       @if (showSnip()) {
         <a class="snip-link" routerLink="/listen">Snip a YM</a>
       }
+    </div>
+  </aside>
 
-      @if (presetsOpen()) {
+  @if (presetsOpen()) {
+    <div class="preset-modal-layer">
+      <div class="preset-modal-backdrop" (click)="closePresetsModal()"></div>
+      <div
+        class="preset-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Add from presets"
+        (click)="$event.stopPropagation()">
+        <div class="preset-modal-header">
+          <h3>Add from presets</h3>
+          <button type="button" class="preset-modal-close" (click)="closePresetsModal()" aria-label="Close">×</button>
+        </div>
+        <label class="preset-search-label">Search
+          <input
+            #presetSearchInput
+            type="search"
+            class="preset-search"
+            [value]="presetSearch()"
+            (input)="presetSearch.set(($any($event.target)).value)"
+            placeholder="Filter by name" />
+        </label>
         <div class="preset-menu">
-          @for (roleGroup of presetGroups(); track roleGroup.role) {
+          @for (roleGroup of filteredPresetGroups(); track roleGroup.role) {
             <div class="preset-role">
               <h4 class="preset-role-title">{{ roleGroup.label }}</h4>
               @for (kindGroup of roleGroup.kinds; track kindGroup.kind) {
@@ -317,14 +347,16 @@
                 </div>
               }
             </div>
+          } @empty {
+            <p class="preset-empty">No presets match.</p>
           }
           @if (presetStatus()) {
             <p class="preset-status">{{ presetStatus() }}</p>
           }
         </div>
-      }
+      </div>
     </div>
-  </aside>
+  }
 
   <p class="hint">Z through M play notes. Q through U is the next octave. Arrows move. Backtick cuts the note. Space plays. Ctrl+Z undoes. Ctrl+Y or Ctrl+Shift+Z redoes. Octave {{ state().octave }}.</p>
   <p class="status" role="status">{{ status() }}</p>

@@ -721,6 +721,33 @@ export function addInstrumentFromCustomPreset(state: SessionState, id: string): 
   });
 }
 
+/**
+ * Import an external custom preset: append to project customs (new id) and add/arm an instrument.
+ * No-ops when the preset chip does not match the open project.
+ */
+export function importCustomPreset(
+  state: SessionState,
+  preset: Omit<CustomInstrumentPreset, 'id'> | CustomInstrumentPreset,
+): SessionState {
+  if (preset.chip !== state.project.chip) {
+    return state;
+  }
+  const project = cloneProject(state.project);
+  if (!project.customPresets) {
+    project.customPresets = [];
+  }
+  const custom: CustomInstrumentPreset = {
+    id: nextCustomPresetId(project),
+    name: preset.name.trim().slice(0, 40) || 'Imported',
+    chip: preset.chip,
+    kind: preset.kind,
+    role: preset.role,
+    patch: preset.patch,
+  };
+  project.customPresets = [...project.customPresets, custom];
+  return addInstrumentFromCustomPreset(commit(state, project), custom.id);
+}
+
 export function setTempo(state: SessionState, tempo: number): SessionState {
   return mutateActiveSong(state, (body) => ({
     ...body,

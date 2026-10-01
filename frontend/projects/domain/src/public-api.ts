@@ -93,6 +93,7 @@ export {
   reorderOrder,
   removeCustomPreset,
   replaceWithRandom,
+  importCustomPreset,
   saveCustomPreset,
   selectOrder,
   selectSong,

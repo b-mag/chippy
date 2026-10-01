@@ -10,9 +10,12 @@ import {
   exportVgm,
   exportWav,
   exportYm,
+  instrumentDownloadName,
+  parseInstrumentFile,
   parseProject,
   parseYm,
   renderPcm,
+  serializeInstrumentFile,
   serializeProject,
 } from '@chippy/files';
 import type { AyFrame, GbFrame } from '@chippy/engines';
@@ -114,6 +117,44 @@ describe('project file', () => {
       }],
     };
     expect(parseProject(JSON.stringify(withCustom)).customPresets[0].name).toBe('My lead');
+  });
+});
+
+describe('instrument file', () => {
+  it('round-trips an instrument and rejects bad shapes', () => {
+    const project = newProject('nes');
+    const instrument = project.instruments[0];
+    const text = serializeInstrumentFile(instrument, 'nes', 'lead');
+    const parsed = parseInstrumentFile(text);
+    expect(parsed.name).toBe(instrument.name);
+    expect(parsed.chip).toBe('nes');
+    expect(parsed.kind).toBe(instrument.kind);
+    expect(parsed.role).toBe('lead');
+    expect(parsed.patch).not.toHaveProperty('id');
+    expect(parsed.patch).not.toHaveProperty('name');
+    expect(instrumentDownloadName('My Lead!')).toBe('My-Lead.chippy-instrument.json');
+    expect(instrumentDownloadName('!!!')).toBe('instrument.chippy-instrument.json');
+    expect(() => parseInstrumentFile('{')).toThrow(/JSON/);
+    expect(() => parseInstrumentFile('[]')).toThrow(/object/);
+    expect(() => parseInstrumentFile(JSON.stringify({ version: 1, type: 'other' }))).toThrow(/instrument file/i);
+    expect(() => parseInstrumentFile(JSON.stringify({
+      version: 99,
+      type: 'chippy-instrument',
+      name: 'X',
+      chip: 'nes',
+      kind: 'pulse',
+      role: 'lead',
+      patch: {},
+    }))).toThrow(/version/);
+    expect(() => parseInstrumentFile(JSON.stringify({
+      version: 1,
+      type: 'chippy-instrument',
+      name: 'X',
+      chip: 'zx',
+      kind: 'pulse',
+      role: 'lead',
+      patch: {},
+    }))).toThrow(/chip/);
   });
 });
 

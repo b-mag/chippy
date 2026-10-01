@@ -418,6 +418,8 @@
   flex: 0 0 auto;
   min-width: 0;
   margin-bottom: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--cell-edge);
 }
 
 .audition-strip {
@@ -473,16 +475,93 @@
   line-height: 1.2;
 }
 
+/* Overlay the whole workspace grid so the modal does not steal a 1fr row. */
+.preset-modal-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.preset-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, #000 45%, transparent);
+  pointer-events: auto;
+}
+
+.preset-modal {
+  position: relative;
+  z-index: 1;
+  width: min(28rem, calc(100vw - 32px));
+  max-height: min(36rem, calc(100vh - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: var(--chrome);
+  border: 1px solid var(--cell-edge);
+  border-radius: 10px;
+  box-shadow: 0 10px 32px color-mix(in srgb, #000 35%, transparent);
+  pointer-events: auto;
+}
+
+.preset-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.preset-modal-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.preset-modal-close {
+  flex: 0 0 2rem;
+  min-width: 2rem;
+  min-height: 2rem;
+  padding: 0;
+  line-height: 1;
+  font-size: 1.25rem;
+}
+
+.preset-search-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+
+.preset-search {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .preset-menu {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 16rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
   overflow-y: auto;
   border: 1px solid var(--cell-edge);
   border-radius: 6px;
   padding: 6px;
   background: var(--cell);
+}
+
+.preset-empty {
+  margin: 8px 4px;
+  font-size: 0.85rem;
+  color: var(--muted);
 }
 
 .preset-role-title {

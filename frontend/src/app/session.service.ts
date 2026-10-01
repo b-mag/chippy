@@ -29,6 +29,7 @@ import {
   renameInstrument,
   renamePattern,
   reorderOrder,
+  importCustomPreset,
   saveCustomPreset,
   selectOrder,
   selectSong,
@@ -47,6 +48,7 @@ import {
   type CellEffect,
   type Instrument,
   type InstrumentKind,
+  type CustomInstrumentPreset,
   type InstrumentPreset,
   type PresetRole,
   type Project,
@@ -186,6 +188,10 @@ export class SessionService {
 
   saveCustomPreset(name: string, role?: PresetRole): void {
     this.state.update((state) => saveCustomPreset(state, name, role));
+  }
+
+  importCustomPreset(preset: Omit<CustomInstrumentPreset, 'id'> | CustomInstrumentPreset): void {
+    this.state.update((state) => importCustomPreset(state, preset));
   }
 
   removeCustomPreset(id: string): void {
