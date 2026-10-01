@@ -7,11 +7,25 @@ export const PROJECT_VERSION = 2;
 /** Legacy flat-document version still accepted on open and migrated to v2. */
 export const LEGACY_PROJECT_VERSION = 1;
 
-export type ChipId = 'gameboy' | 'vectrex';
+export type ChipId = 'gameboy' | 'vectrex' | 'c64';
 
-export type ColumnId = 'note' | 'instrument' | 'volume';
+export type ColumnId = 'note' | 'instrument' | 'volume' | 'effect';
 
-export type InstrumentKind = 'pulse' | 'wave' | 'noise' | 'tone' | 'snip';
+/**
+ * Shared FX commands (common-denominator tracker column).
+ * Engines that do not implement a command ignore it.
+ * - A: volume slide down by `value` each frame (0-15)
+ * - D: delay note onset by `value` frames into the row (0-15)
+ * - R: retrigger / re-gate every `value` frames (1-15)
+ */
+export type EffectCmd = 'A' | 'D' | 'R';
+
+export interface CellEffect {
+  cmd: EffectCmd;
+  value: number;
+}
+
+export type InstrumentKind = 'pulse' | 'wave' | 'noise' | 'tone' | 'snip' | 'sid';
 
 /** One step on one channel. Empty means the previous note keeps sounding. */
 export interface Cell {
@@ -21,6 +35,8 @@ export interface Cell {
   instrumentId: string | null;
   /** Chip volume 0 through 15. Null keeps the instrument's own level. */
   volume: number | null;
+  /** Optional effect. Null means no FX on this step. */
+  effect: CellEffect | null;
 }
 
 export interface Pattern {
@@ -60,6 +76,29 @@ export interface Instrument {
    * triggered the instrument.
    */
   frames: number[][] | null;
+  /** SID attack rate 0-15. */
+  attack: number;
+  /** SID decay rate 0-15. */
+  decay: number;
+  /** SID sustain level 0-15. */
+  sustain: number;
+  /** SID release rate 0-15. */
+  release: number;
+  waveTriangle: boolean;
+  waveSaw: boolean;
+  wavePulse: boolean;
+  waveNoise: boolean;
+  /** SID pulse width 0-4095 (12-bit). */
+  pulseWidth: number;
+  ringMod: boolean;
+  sync: boolean;
+  filterEnable: boolean;
+  /** Filter cutoff 0-2047. */
+  filterCutoff: number;
+  /** Filter resonance 0-15. */
+  filterResonance: number;
+  /** 0 = low, 1 = band, 2 = high. */
+  filterMode: 0 | 1 | 2;
 }
 
 /** One song inside a project. Patterns and order live here; instruments do not. */
@@ -107,4 +146,13 @@ export interface Cursor {
   row: number;
   channel: number;
   column: ColumnId;
+}
+
+export const EFFECT_CMDS: EffectCmd[] = ['A', 'D', 'R'];
+
+export function formatEffect(effect: CellEffect | null): string {
+  if (!effect) {
+    return '..';
+  }
+  return `${effect.cmd}${effect.value.toString(16).toUpperCase()}`;
 }

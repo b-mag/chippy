@@ -71,7 +71,7 @@ public final class ProjectValidator {
     }
 
     private static void validateChip(String chip) {
-        if (!"gameboy".equals(chip) && !"vectrex".equals(chip)) {
+        if (!"gameboy".equals(chip) && !"vectrex".equals(chip) && !"c64".equals(chip)) {
             throw new UploadRejectedException("Unknown chip.");
         }
     }

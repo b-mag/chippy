@@ -1,6 +1,6 @@
 # Chippy
 
-A web tracker for writing Game Boy and Vectrex chiptunes.  I'd like to keep it as simple as LSDJ and support various 8 bit chips.  PS just in case one of the guys from the other day reads this... yes an Index can speed up deletes.
+A web tracker for writing Game Boy, Vectrex, and C64 chiptunes.  I'd like to keep it as simple as LSDJ and support various 8 bit chips.  PS just in case one of the guys from the other day reads this... yes an Index can speed up deletes.
 
 Current state: Tracker and on the other tab a full internet streaming radio - I was thinking in my head I could eventually set it up where people could submit their chip tune creations and I can have this project also stream chiptunes created with the app... allowing users to thumb up or thumb down to further refine song plays/distribution.
 
@@ -17,7 +17,8 @@ Also did some UI tweaking and refinements.
 
 - One screen with Song Order, every channel, and the instrument studio.
 - A project holds one chip, a shared instrument bank, and one or more songs.
-- Game Boy (PU1/PU2/WAV/NOI) and Vectrex (three tone channels).
+- Game Boy (PU1/PU2/WAV/NOI), Vectrex (three tone channels), and C64 (three SID voices).
+- Pattern grid columns: note, instrument, volume, and a shared FX column (`A` volume slide, `D` note delay, `R` retrigger).
 - Instrument studio: rename/type/delete, pitch audition, chip-specific hardware controls, free and premium presets (`presets.unlockAll` in config unlocks premium for local/dev).
 - Changing chip starts a new blank project after confirm. Opening a project warns when the session is dirty.
 - The keyboard plays a note as you write it. Undo, mute, and solo are on that screen.
@@ -25,17 +26,14 @@ Also did some UI tweaking and refinements.
 - A short opening animation. Set `splashEnabled` to `false` in `frontend/public/config.json`, or `chippy.splash.enabled` in `chippy-api/src/main/resources/application.yml`.
 - Save a `.chippy.json` project (v2) and open one again. Legacy v1 song files migrate on open. Uploads are parsed and rejected when they are not a project or a YM file.
 - Create a random song after a warning and typing YES.
-- Export WAV, YM6, Game Boy VGM, and a Vectrex AKY assembly file plus player config.
+- Export WAV (all chips), YM6 and Vectrex AKY (Vectrex), Game Boy VGM.
 - Open a YM beside the song, play a range, and keep it as an instrument.
 - Optional Buy Me a Coffee prompt and Google AdSense slot, both off until you configure them. See [MONETIZATION_SETUP.md](MONETIZATION_SETUP.md).
 - API rate limits on upload validation to reduce abuse.
 
 ## Later
 
-- More chips (C64, NES, Atari ST), snip on those chips, and a dedicated YM Player.
-- YM Radio (rotation, submit/approve, thumbs, visualization).
-- Deeper tracker tools such as tables, grooves, and Chains. LSDJ `.SAV` / `.lsdsng` bridge.
-- Real sign-in so donors can use an ad-free session and premium presets without `unlockAll`.
+See [FUTURE.md](FUTURE.md) for the backlog: mobile phone browser compatibility, LSDJ `.SAV` / `.lsdsng` export (synthetic chains from flat order), Chains/tables/grooves UI, NES / Atari ST, Chippy-owned YM Radio, and real donor sign-in.
 
 ## Run it locally
 
@@ -67,7 +65,7 @@ flowchart LR
     Tracker[Order pattern instrument]
     Listen[YM snip]
     Domain[Domain]
-    Engines[GB and AY engines]
+    Engines[GB AY and soft SID]
   end
   subgraph api [Spring Boot]
     Validate[Upload checks]

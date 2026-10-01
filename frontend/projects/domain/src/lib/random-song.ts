@@ -34,6 +34,7 @@ export function fillPatternRandom(pattern: Pattern, chip: ChipId, instrumentId: 
         cut: false,
         instrumentId,
         volume: 8 + Math.floor(random() * 8),
+        effect: null,
       };
     }
   }

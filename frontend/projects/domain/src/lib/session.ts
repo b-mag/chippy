@@ -13,6 +13,7 @@ import {
 import {
   PATTERN_ROWS,
   type Cell,
+  type CellEffect,
   type ChipId,
   type ColumnId,
   type Cursor,
@@ -106,7 +107,7 @@ export function patternDisplayName(pattern: Pattern, fallbackIndex: number): str
   return `Pattern ${fallbackIndex + 1}`;
 }
 
-const COLUMNS: ColumnId[] = ['note', 'instrument', 'volume'];
+const COLUMNS: ColumnId[] = ['note', 'instrument', 'volume', 'effect'];
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
 /** Lower keyboard row, tracker layout. Z is C. */
@@ -243,6 +244,9 @@ function writeCell(state: SessionState, cell: Cell, advance: boolean): SessionSt
 /** Write a note with the armed instrument, play it, and move down one row. */
 export function enterNote(state: SessionState, midi: number): SessionState {
   const instrument = armedInstrument(state.project);
+  const body = activeSongBody(state.project);
+  const pattern = currentPattern(body, state.cursor);
+  const existing = pattern.rows[state.cursor.row][state.cursor.channel];
   return writeCell(
     state,
     {
@@ -250,15 +254,19 @@ export function enterNote(state: SessionState, midi: number): SessionState {
       cut: false,
       instrumentId: instrument.id,
       volume: null,
+      effect: existing?.effect ?? null,
     },
     true,
   );
 }
 
 export function enterCut(state: SessionState): SessionState {
+  const body = activeSongBody(state.project);
+  const pattern = currentPattern(body, state.cursor);
+  const existing = pattern.rows[state.cursor.row][state.cursor.channel];
   return writeCell(
     state,
-    { note: null, cut: true, instrumentId: null, volume: null },
+    { note: null, cut: true, instrumentId: null, volume: null, effect: existing?.effect ?? null },
     true,
   );
 }
@@ -271,7 +279,40 @@ export function setVolume(state: SessionState, volume: number): SessionState {
   const body = activeSongBody(state.project);
   const pattern = currentPattern(body, state.cursor);
   const existing = pattern.rows[state.cursor.row][state.cursor.channel];
-  return writeCell(state, { ...existing, volume }, true);
+  return writeCell(state, { ...existing, volume, effect: existing.effect ?? null }, true);
+}
+
+export function setEffect(state: SessionState, effect: CellEffect | null): SessionState {
+  const body = activeSongBody(state.project);
+  const pattern = currentPattern(body, state.cursor);
+  const existing = pattern.rows[state.cursor.row][state.cursor.channel];
+  return writeCell(state, { ...existing, effect, volume: existing.volume ?? null }, true);
+}
+
+/** Assign an instrument to the current cell (tracker instrument column). */
+export function setCellInstrument(state: SessionState, instrumentId: string | null): SessionState {
+  const body = activeSongBody(state.project);
+  const pattern = currentPattern(body, state.cursor);
+  const existing = pattern.rows[state.cursor.row][state.cursor.channel];
+  const next = writeCell(
+    state,
+    { ...existing, instrumentId, volume: existing.volume ?? null, effect: existing.effect ?? null },
+    true,
+  );
+  if (!instrumentId) {
+    return next;
+  }
+  return { ...next, project: { ...next.project, armedInstrumentId: instrumentId } };
+}
+
+/** Resolve a typed instrument number (1-9, or hex digit matching the panel label) to an id. */
+export function findInstrumentIdByNumberLabel(project: Project, label: string): string | null {
+  const needle = label.toLowerCase();
+  const match = project.instruments.find((instrument) => {
+    const short = instrument.id.replace(/^ins-/, '').replace(/^snip-/, 's').toLowerCase();
+    return short === needle;
+  });
+  return match?.id ?? null;
 }
 
 export function moveCursor(state: SessionState, deltaRow: number, deltaChannel: number, deltaColumn: number): SessionState {
@@ -321,9 +362,10 @@ export function setChip(state: SessionState, chip: ChipId): SessionState {
 }
 
 export function addPattern(state: SessionState): SessionState {
+  const channelCount = chipDefinition(state.project.chip).channels.length;
   const next = mutateActiveSong(state, (body) => {
     const id = nextPatternId(body);
-    const pattern = blankPattern(id, nextBlankPatternName(body));
+    const pattern = blankPattern(id, nextBlankPatternName(body), channelCount);
     return {
       ...body,
       patterns: [...body.patterns, pattern],
@@ -442,9 +484,10 @@ export function clearPattern(state: SessionState): SessionState {
 }
 
 export function addRandomPattern(state: SessionState, seed: number): SessionState {
+  const channelCount = chipDefinition(state.project.chip).channels.length;
   const next = mutateActiveSong(state, (body) => {
     const id = nextPatternId(body);
-    const pattern = blankPattern(id, nextBlankPatternName(body));
+    const pattern = blankPattern(id, nextBlankPatternName(body), channelCount);
     fillPatternRandom(pattern, state.project.chip, state.project.armedInstrumentId, seed);
     return {
       ...body,

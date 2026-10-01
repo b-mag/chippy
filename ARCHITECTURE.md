@@ -1,11 +1,11 @@
 # Architecture
 
-Chippy is one Angular application and one Spring Boot WAR. A new chip adds a `ChipDefinition` (channels, instrument fields, engine) and an exporter. It does not add a new screen flow.
+Chippy is one Angular application and one Spring Boot WAR. A new chip adds a `ChipDefinition` (channels, instrument fields, engine) and an exporter. It does not add a new screen flow. Game Boy, Vectrex (AY), and C64 (soft SID) share the same Order → Patterns tracker with note / instrument / volume / FX columns.
 
 ## Libraries
 
 - `frontend/projects/domain` has the song, the pattern, and the editing commands. It does not import Angular.
-- `frontend/projects/engines` turns a song into Game Boy or AY register frames.
+- `frontend/projects/engines` turns a song into Game Boy, AY, or soft-SID register frames.
 - `frontend/projects/files` writes `.chippy.json`, WAV, YM6, VGM, and AKY. Export code is loaded when Export is opened.
 - `src/app/tracker` and `src/app/listen` are lazy routes and do not import each other.
 - ESLint rejects an Angular import inside `domain` or `files`, and a files import inside `engines`.
@@ -16,7 +16,7 @@ A `.chippy.json` **Project** (v2) holds `chip`, shared `instruments`, and one or
 
 ## Files
 
-The editable file is `.chippy.json`. Vectrex download is WAV, uncompressed YM6, and little-endian 6809 AKY plus a player config for Malban's player. Game Boy download is WAV and VGM. A YM opened on the snip page does not change the song until "Use in this song".
+The editable file is `.chippy.json`. Vectrex download is WAV, uncompressed YM6, and little-endian 6809 AKY plus a player config for Malban's player. Game Boy download is WAV and VGM. C64 download is WAV (soft SID). A YM opened on the snip page does not change the song until "Use in this song".
 
 ## Runtimes
 

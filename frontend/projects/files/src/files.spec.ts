@@ -27,7 +27,19 @@ describe('project file', () => {
     expect(() => parseProject('[]')).toThrow(/object/);
     expect(() => parseProject(JSON.stringify({ ...project, virus: true }))).toThrow(/Unknown/);
     expect(() => parseProject(JSON.stringify({ ...project, version: 99 }))).toThrow(/version/);
-    expect(() => parseProject(JSON.stringify({ ...project, chip: 'c64' }))).toThrow(/chip/);
+    expect(() => parseProject(JSON.stringify({ ...project, chip: 'nes' }))).toThrow(/chip/);
+    const c64 = newProject('c64');
+    expect(parseProject(serializeProject(c64)).chip).toBe('c64');
+    expect(parseProject(serializeProject(c64)).instruments[0].kind).toBe('sid');
+    const withFx = serializeProject(c64);
+    const parsedFx = JSON.parse(withFx);
+    parsedFx.songs[0].patterns[0].rows[0][0].effect = { cmd: 'D', value: 4 };
+    expect(parseProject(JSON.stringify(parsedFx)).songs[0].patterns[0].rows[0][0].effect).toEqual({
+      cmd: 'D',
+      value: 4,
+    });
+    parsedFx.songs[0].patterns[0].rows[0][0].effect = { cmd: 'Z', value: 1 };
+    expect(parseProject(JSON.stringify(parsedFx)).songs[0].patterns[0].rows[0][0].effect).toBeNull();
     expect(downloadName({ ...project, name: 'My Song!' }, 'json')).toBe('My-Song.json');
     expect(downloadName({ ...project, name: '!!!' }, 'json')).toBe('chippy.json');
     const legacy = {
@@ -90,6 +102,16 @@ describe('export helpers', () => {
     expect(renderSong(song).chip).toBe('vectrex');
   });
 
+  it('exports wav for c64 soft SID', () => {
+    const song = songForRender(enterNote(newSession('c64'), 60).project);
+    const wav = exportWav(song);
+    expect(wav.filename.endsWith('.wav')).toBe(true);
+    expect(wav.bytes.length).toBeGreaterThan(44);
+    expect(renderSong(song).chip).toBe('c64');
+    expect(() => exportYm(song)).toThrow(/Vectrex/);
+    expect(() => exportVgm(song)).toThrow(/Game Boy/);
+  });
+
   it('covers pcm edge paths and ym parse errors', () => {
     expect(a4Period()).toBeGreaterThan(0);
     expect(a4Hz()).toBeCloseTo(440, 5);
@@ -108,6 +130,30 @@ describe('export helpers', () => {
       wave: new Array(32).fill(8),
     };
     expect(renderPcm({ chip: 'gameboy', frameRate: 60, framesPerRow: 1, frames: [gb] }).length).toBeGreaterThan(0);
+    const c64Song = songForRender(enterNote(newSession('c64'), 60).project);
+    c64Song.instruments[0] = {
+      ...c64Song.instruments[0],
+      waveSaw: true,
+      wavePulse: false,
+      filterEnable: true,
+      filterMode: 1,
+    };
+    const c64Rendered = renderSong(c64Song);
+    expect(c64Rendered.chip).toBe('c64');
+    if (c64Rendered.chip === 'c64') {
+      expect(renderPcm(c64Rendered).length).toBeGreaterThan(0);
+      const high = {
+        ...c64Rendered,
+        frames: c64Rendered.frames.map((frame) => ({
+          ...frame,
+          filterMode: 2 as const,
+          voices: frame.voices.map((voice, index) =>
+            index === 0 ? { ...voice, wave: 'triangle' as const, filter: true } : voice,
+          ) as typeof frame.voices,
+        })),
+      };
+      expect(renderPcm(high).length).toBeGreaterThan(0);
+    }
     const bytes = encodeYm6([ay], 'Solo');
     expect(parseYm(bytes).name).toBe('Solo');
     const withDigi = Uint8Array.from(bytes);

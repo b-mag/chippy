@@ -45,6 +45,7 @@ import {
   setSongName,
   setTempo,
   setVolume,
+  setEffect,
   songForRender,
   undo,
   updateInstrument,
@@ -60,7 +61,7 @@ describe('session editing', () => {
     expect(noteFromKey('?', 4)).toBeNull();
   });
 
-  it('supports cut, clear, volume, undo and redo', () => {
+  it('supports cut, clear, volume, effect, undo and redo', () => {
     let state = enterNote(newSession('gameboy'), 60);
     state = enterCut(state);
     expect(activeSongBody(state.project).patterns[0].rows[1][0].cut).toBe(true);
@@ -68,6 +69,8 @@ describe('session editing', () => {
     expect(activeSongBody(state.project).patterns[0].rows[0][0].note).toBeNull();
     state = setVolume({ ...state, cursor: { ...state.cursor, row: 0 } }, 10);
     expect(activeSongBody(state.project).patterns[0].rows[0][0].volume).toBe(10);
+    state = setEffect({ ...state, cursor: { ...state.cursor, row: 0 } }, { cmd: 'A', value: 3 });
+    expect(activeSongBody(state.project).patterns[0].rows[0][0].effect).toEqual({ cmd: 'A', value: 3 });
     const afterUndo = undo(state);
     expect(afterUndo.project).not.toBe(state.project);
     expect(activeSongBody(redo(afterUndo).project).patterns[0].rows[0][0].volume).toBe(10);
@@ -86,9 +89,10 @@ describe('session editing', () => {
     state = moveCursor(state, 0, 0, -1);
     expect(state.cursor.column).toBe('instrument');
     state = moveCursor({ ...state, cursor: { ...state.cursor, column: 'note', channel: 0 } }, 0, 0, -1);
-    expect(state.cursor.column).toBe('volume');
-    state = moveCursor({ ...state, cursor: { ...state.cursor, column: 'volume', channel: 0 } }, 0, 0, 1);
+    expect(state.cursor.column).toBe('effect');
+    state = moveCursor({ ...state, cursor: { ...state.cursor, column: 'effect', channel: 0 } }, 0, 0, 1);
     expect(state.cursor.column).toBe('note');
+    expect(state.cursor.channel).toBe(1);
   });
 
   it('wipes the project when the chip changes and edits name, tempo, songs, instruments', () => {
@@ -173,7 +177,10 @@ describe('session editing', () => {
     expect(patternDisplayName({ id: 'x', name: '', rows: [] }, 2)).toBe('Pattern 3');
     expect(renamePattern(state, activeSongBody(state.project).patterns[0].id, '   ')).toBe(state);
     expect(chipIds()).toContain('gameboy');
+    expect(chipIds()).toContain('c64');
     expect(chipDefinition('vectrex').channels).toHaveLength(3);
+    expect(chipDefinition('c64').createInstrument('pulse').kind).toBe('sid');
+    expect(presetsForChip('c64').length).toBeGreaterThan(0);
   });
 
   it('keeps Pattern N and duplicate suffixes stable across add and copy', () => {

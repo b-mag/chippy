@@ -62,7 +62,30 @@
 
 .grid { overflow: auto; padding: 8px; background: var(--cell); }
 
-.order h2, .instrument h2 { margin: 0 0 8px; font-size: 1rem; flex: 0 0 auto; }
+.order h2, .instrument h2, .grid-title {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  flex: 0 0 auto;
+}
+
+.grid-title {
+  padding: 10px 12px 0;
+}
+
+.column-keys {
+  display: flex;
+  gap: 4px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.7rem;
+  opacity: 0.65;
+  margin-bottom: 2px;
+}
+
+.column-keys span {
+  flex: 1;
+  text-align: center;
+  min-width: 2.6rem;
+}
 
 .order-list {
   list-style: none;
@@ -174,7 +197,7 @@
 .channel-cells { display: flex; gap: 4px; }
 
 .cell {
-  min-width: 3.2rem;
+  min-width: 2.6rem;
   font-family: ui-monospace, monospace;
   background: var(--cell);
   color: var(--ink);
@@ -244,6 +267,14 @@
   background: color-mix(in srgb, var(--cursor) 28%, var(--cell));
   border-color: var(--cursor);
   font-weight: 600;
+}
+
+.instrument-num {
+  display: inline-block;
+  min-width: 1.25rem;
+  margin-right: 0.35rem;
+  font-family: ui-monospace, monospace;
+  opacity: 0.75;
 }
 
 .instrument-rename {

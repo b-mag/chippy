@@ -1,4 +1,5 @@
-import { chipDefinition, type Instrument, type Song } from '@chippy/domain';
+import { chipDefinition, type Cell, type CellEffect, type Instrument, type Song } from '@chippy/domain';
+import { emptySidFrame, softSidVoiceFrame, type SidFrame, type SoftSidVoiceParams } from './soft-sid';
 import { ayPeriod, framesPerRow, gbFrequency } from './timing';
 
 /** Sixteen YM registers. Indexes 14 and 15 are unused padding, matching YM6. */
@@ -24,9 +25,12 @@ export interface GbFrame {
   wave: number[];
 }
 
+export type { SidFrame };
+
 export type RenderedSong =
   | { chip: 'vectrex'; frameRate: number; framesPerRow: number; frames: AyFrame[] }
-  | { chip: 'gameboy'; frameRate: number; framesPerRow: number; frames: GbFrame[] };
+  | { chip: 'gameboy'; frameRate: number; framesPerRow: number; frames: GbFrame[] }
+  | { chip: 'c64'; frameRate: number; framesPerRow: number; frames: SidFrame[] };
 
 /** Four built-in 32-sample waveforms. Values are 4-bit, 0 through 15. */
 export const WAVEFORMS: number[][] = [
@@ -42,19 +46,38 @@ interface Voice {
   volume: number | null;
   snipIndex: number;
   active: boolean;
+  /** Pending note when effect D delays onset. */
+  pendingNote: number | null;
+  pendingInstrumentId: string | null;
+  pendingVolume: number | null;
+  delayFramesLeft: number;
+  volumeSlide: number;
+  retriggerPeriod: number;
+  retriggerAge: number;
+  gateAge: number;
+  gated: boolean;
 }
 
 function instrumentOf(song: Song, id: string | null): Instrument | undefined {
   return song.instruments.find((item) => item.id === id);
 }
 
-function silentVoices(): Voice[] {
-  return Array.from({ length: 4 }, () => ({
+function silentVoices(count: number): Voice[] {
+  return Array.from({ length: count }, () => ({
     note: null,
     instrumentId: null,
     volume: null,
     snipIndex: 0,
     active: false,
+    pendingNote: null,
+    pendingInstrumentId: null,
+    pendingVolume: null,
+    delayFramesLeft: 0,
+    volumeSlide: 0,
+    retriggerPeriod: 0,
+    retriggerAge: 0,
+    gateAge: 0,
+    gated: false,
   }));
 }
 
@@ -70,27 +93,91 @@ function dominantTone(frame: number[]): { period: number; volume: number } {
   return best;
 }
 
-function applyRow(song: Song, voices: Voice[], row: { note: number | null; cut: boolean; instrumentId: string | null; volume: number | null }[]): void {
+function applyEffect(voice: Voice, effect: CellEffect | null): void {
+  voice.volumeSlide = 0;
+  voice.retriggerPeriod = 0;
+  if (!effect) {
+    return;
+  }
+  if (effect.cmd === 'A') {
+    voice.volumeSlide = -(effect.value & 0x0f);
+  } else if (effect.cmd === 'R') {
+    voice.retriggerPeriod = Math.max(1, effect.value & 0x0f);
+    voice.retriggerAge = 0;
+  }
+}
+
+function triggerNote(
+  voice: Voice,
+  note: number,
+  instrumentId: string | null,
+  volume: number | null,
+): void {
+  voice.active = true;
+  voice.note = note;
+  voice.instrumentId = instrumentId;
+  voice.volume = volume;
+  voice.snipIndex = 0;
+  voice.gateAge = 0;
+  voice.gated = true;
+}
+
+function applyRow(voices: Voice[], row: Cell[]): void {
   voices.forEach((voice, index) => {
     const cell = row[index];
     if (!cell) {
       return;
     }
+    applyEffect(voice, cell.effect ?? null);
     if (cell.cut) {
       voice.active = false;
       voice.note = null;
+      voice.pendingNote = null;
+      voice.delayFramesLeft = 0;
+      voice.gated = false;
+      voice.gateAge = 0;
       return;
     }
     if (cell.note !== null) {
-      voice.active = true;
-      voice.note = cell.note;
-      voice.instrumentId = cell.instrumentId;
-      voice.volume = cell.volume;
-      voice.snipIndex = 0;
+      const delay = cell.effect?.cmd === 'D' ? cell.effect.value & 0x0f : 0;
+      if (delay > 0) {
+        voice.pendingNote = cell.note;
+        voice.pendingInstrumentId = cell.instrumentId;
+        voice.pendingVolume = cell.volume;
+        voice.delayFramesLeft = delay;
+      } else {
+        triggerNote(voice, cell.note, cell.instrumentId, cell.volume);
+      }
     } else if (cell.volume !== null) {
       voice.volume = cell.volume;
     }
   });
+}
+
+function tickVoiceFx(voice: Voice): void {
+  if (voice.delayFramesLeft > 0) {
+    voice.delayFramesLeft -= 1;
+    if (voice.delayFramesLeft === 0 && voice.pendingNote !== null) {
+      triggerNote(voice, voice.pendingNote, voice.pendingInstrumentId, voice.pendingVolume);
+      voice.pendingNote = null;
+    }
+  }
+  if (voice.volumeSlide !== 0 && voice.volume !== null) {
+    voice.volume = Math.min(15, Math.max(0, voice.volume + voice.volumeSlide));
+  } else if (voice.volumeSlide !== 0 && voice.volume === null && voice.active) {
+    voice.volume = Math.min(15, Math.max(0, 12 + voice.volumeSlide));
+  }
+  if (voice.retriggerPeriod > 0 && voice.active && voice.note !== null) {
+    voice.retriggerAge += 1;
+    if (voice.retriggerAge >= voice.retriggerPeriod) {
+      voice.retriggerAge = 0;
+      voice.gateAge = 0;
+      voice.gated = true;
+    }
+  }
+  if (voice.active) {
+    voice.gateAge += 1;
+  }
 }
 
 function ayFrame(song: Song, voices: Voice[]): AyFrame {
@@ -194,22 +281,67 @@ function gbFrame(song: Song, voices: Voice[]): GbFrame {
   return frame;
 }
 
+function sidParamsFromVoice(song: Song, voice: Voice): SoftSidVoiceParams {
+  const instrument = instrumentOf(song, voice.instrumentId);
+  return {
+    midi: voice.note,
+    active: voice.active,
+    attack: instrument?.attack ?? 2,
+    decay: instrument?.decay ?? 4,
+    sustain: instrument?.sustain ?? 10,
+    release: instrument?.release ?? 4,
+    waveTriangle: instrument?.waveTriangle ?? false,
+    waveSaw: instrument?.waveSaw ?? false,
+    wavePulse: instrument?.wavePulse ?? true,
+    waveNoise: instrument?.waveNoise ?? false,
+    pulseWidth: instrument?.pulseWidth ?? 2048,
+    filterEnable: instrument?.filterEnable ?? false,
+    volume: voice.volume ?? 12,
+    age: voice.gateAge,
+    gated: voice.gated,
+  };
+}
+
+function sidFrame(song: Song, voices: Voice[]): SidFrame {
+  const frame = emptySidFrame();
+  let filterCutoff = 1024;
+  let filterResonance = 8;
+  let filterMode: 0 | 1 | 2 = 0;
+  for (let channel = 0; channel < 3; channel += 1) {
+    const voice = voices[channel];
+    frame.voices[channel] = softSidVoiceFrame(sidParamsFromVoice(song, voice));
+    const instrument = instrumentOf(song, voice.instrumentId);
+    if (instrument?.filterEnable) {
+      filterCutoff = instrument.filterCutoff ?? filterCutoff;
+      filterResonance = instrument.filterResonance ?? filterResonance;
+      filterMode = instrument.filterMode ?? filterMode;
+    }
+  }
+  frame.filterCutoff = filterCutoff;
+  frame.filterResonance = filterResonance;
+  frame.filterMode = filterMode;
+  return frame;
+}
+
 /** Render the whole order list to register frames. Muted channels are applied later, at playback. */
 export function renderSong(song: Song): RenderedSong {
   const definition = chipDefinition(song.chip);
   const perRow = framesPerRow(song.tempo, definition.frameRate);
-  const voices = silentVoices();
-  const frames: AyFrame[] | GbFrame[] = [];
+  const voices = silentVoices(definition.channels.length);
+  const frames: AyFrame[] | GbFrame[] | SidFrame[] = [];
   for (const patternId of song.order) {
     const pattern = song.patterns.find((item) => item.id === patternId);
     if (!pattern) {
       continue;
     }
     for (const row of pattern.rows) {
-      applyRow(song, voices, row);
+      applyRow(voices, row);
       for (let tick = 0; tick < perRow; tick += 1) {
+        voices.forEach(tickVoiceFx);
         if (song.chip === 'vectrex') {
           (frames as AyFrame[]).push(ayFrame(song, voices));
+        } else if (song.chip === 'c64') {
+          (frames as SidFrame[]).push(sidFrame(song, voices));
         } else {
           (frames as GbFrame[]).push(gbFrame(song, voices));
         }
@@ -218,6 +350,9 @@ export function renderSong(song: Song): RenderedSong {
   }
   if (song.chip === 'vectrex') {
     return { chip: 'vectrex', frameRate: definition.frameRate, framesPerRow: perRow, frames: frames as AyFrame[] };
+  }
+  if (song.chip === 'c64') {
+    return { chip: 'c64', frameRate: definition.frameRate, framesPerRow: perRow, frames: frames as SidFrame[] };
   }
   return { chip: 'gameboy', frameRate: definition.frameRate, framesPerRow: perRow, frames: frames as GbFrame[] };
 }

@@ -1,11 +1,12 @@
 import { Injectable, signal } from '@angular/core';
 import {
   auditionChannelIndex,
+  chipDefinition,
   emptyCell,
   PATTERN_ROWS,
   type Song,
 } from '@chippy/domain';
-import { renderSong, type AyFrame, type GbFrame } from '@chippy/engines';
+import { renderSong, type AyFrame, type GbFrame, type SidFrame } from '@chippy/engines';
 
 export type LoopMode = 'off' | 'pattern' | 'song';
 
@@ -37,16 +38,18 @@ export class PlaybackService {
   audition(song: Song, midi: number): void {
     const instrument = song.instruments.find((item) => item.id === song.armedInstrumentId) ?? song.instruments[0];
     const channel = auditionChannelIndex(song.chip, instrument.kind);
+    const channelCount = chipDefinition(song.chip).channels.length;
     const rows = Array.from({ length: PATTERN_ROWS }, () =>
-      Array.from({ length: 4 }, () => emptyCell()),
+      Array.from({ length: channelCount }, () => emptyCell()),
     );
     rows[0][channel] = {
       note: midi,
       cut: false,
       instrumentId: instrument.id,
       volume: null,
+      effect: null,
     };
-    rows[4][channel] = { note: null, cut: true, instrumentId: null, volume: null };
+    rows[4][channel] = { note: null, cut: true, instrumentId: null, volume: null, effect: null };
     const preview: Song = {
       name: 'audition',
       chip: song.chip,
@@ -58,7 +61,7 @@ export class PlaybackService {
     };
     const rendered = renderSong(preview);
     const context = this.ensure();
-    const voiceCount = song.chip === 'vectrex' ? 3 : 4;
+    const voiceCount = channelCount;
     const resumeSong = this.playing();
     if (!resumeSong) {
       this.prepareVoices(context, voiceCount);
@@ -104,7 +107,7 @@ export class PlaybackService {
     this.stop();
     const rendered = renderSong(song);
     const context = this.ensure();
-    this.prepareVoices(context, song.chip === 'vectrex' ? 3 : 4);
+    this.prepareVoices(context, chipDefinition(song.chip).channels.length);
     const perRow = rendered.framesPerRow;
     const patternRows = 16;
     const orderCount = song.order.length;
@@ -166,7 +169,12 @@ export class PlaybackService {
     }
   }
 
-  private applyFrame(chip: 'gameboy' | 'vectrex', frame: AyFrame | GbFrame | undefined, muted: Set<number>, solo: Set<number>): void {
+  private applyFrame(
+    chip: 'gameboy' | 'vectrex' | 'c64',
+    frame: AyFrame | GbFrame | SidFrame | undefined,
+    muted: Set<number>,
+    solo: Set<number>,
+  ): void {
     if (!frame) {
       return;
     }
@@ -180,6 +188,23 @@ export class PlaybackService {
         node.gain.value = on ? ((ay[8 + channel] & 0x0f) / 15) * 0.12 : 0;
         if (on && node.oscillator) {
           node.oscillator.frequency.value = 1_500_000 / (16 * period);
+        }
+      }
+      return;
+    }
+    if (chip === 'c64') {
+      const sid = frame as SidFrame;
+      for (let channel = 0; channel < 3; channel += 1) {
+        const node = this.gains[channel] as GainNode & { oscillator?: OscillatorNode };
+        const voice = sid.voices[channel];
+        const on = voice.amp > 0 && voice.hz > 0 && voice.wave !== 'none' && audible(channel);
+        node.gain.value = on ? voice.amp * 0.12 : 0;
+        if (on && node.oscillator) {
+          node.oscillator.type = voice.wave === 'saw' ? 'sawtooth'
+            : voice.wave === 'triangle' ? 'triangle'
+              : voice.wave === 'noise' ? 'square'
+                : 'square';
+          node.oscillator.frequency.value = voice.hz;
         }
       }
       return;

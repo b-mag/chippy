@@ -34,11 +34,14 @@ import {
   setSongName,
   setTempo,
   setVolume,
+  setEffect,
+  setCellInstrument,
   songForRender,
   undo,
   updateInstrument,
   type ChipId,
   type ColumnId,
+  type CellEffect,
   type Instrument,
   type InstrumentKind,
   type InstrumentPreset,
@@ -86,6 +89,14 @@ export class SessionService {
 
   volume(value: number): void {
     this.state.update((state) => setVolume(state, value));
+  }
+
+  effect(effect: CellEffect | null): void {
+    this.state.update((state) => setEffect(state, effect));
+  }
+
+  cellInstrument(instrumentId: string | null): void {
+    this.state.update((state) => setCellInstrument(state, instrumentId));
   }
 
   undo(): void {

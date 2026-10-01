@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   addSnipInstrument,
+  enterCut,
   enterNote,
   newProject,
   newSession,
@@ -82,5 +83,115 @@ describe('renderSong', () => {
     const withSecond = enterNote(pulse2, 62);
     const rendered = renderSong(songForRender(withSecond.project));
     expect(rendered.chip).toBe('gameboy');
+  });
+
+  it('renders soft SID frames for C64', () => {
+    let state = newSession('c64');
+    state = updateInstrument(state, state.project.armedInstrumentId, {
+      wavePulse: true,
+      attack: 0,
+      decay: 2,
+      sustain: 12,
+      release: 2,
+    });
+    state = enterNote(state, 60);
+    const rendered = renderSong(songForRender(state.project));
+    expect(rendered.chip).toBe('c64');
+    if (rendered.chip !== 'c64') {
+      return;
+    }
+    expect(rendered.frames.length).toBeGreaterThan(0);
+    expect(rendered.frames[0].voices[0].hz).toBeGreaterThan(0);
+    expect(rendered.frames[0].voices[0].amp).toBeGreaterThan(0);
+    expect(rendered.frames[0].voices[0].wave).toBe('square');
+  });
+
+  it('honors delay and volume-slide FX on all chips', () => {
+    let state = enterNote(newSession('gameboy'), 60);
+    const body = songForRender(state.project);
+    body.patterns[0].rows[0][0] = {
+      ...body.patterns[0].rows[0][0],
+      effect: { cmd: 'D', value: 2 },
+    };
+    const delayed = renderSong(body);
+    expect(delayed.chip).toBe('gameboy');
+    if (delayed.chip === 'gameboy') {
+      expect(delayed.frames[0].nr14 & 0x80).toBe(0);
+      expect(delayed.frames[1].nr14 & 0x80).toBe(0x80);
+    }
+    let slide = enterNote(newSession('c64'), 64);
+    const slideSong = songForRender(slide.project);
+    slideSong.patterns[0].rows[0][0] = {
+      ...slideSong.patterns[0].rows[0][0],
+      volume: 12,
+      effect: { cmd: 'A', value: 2 },
+    };
+    const slid = renderSong(slideSong);
+    expect(slid.chip).toBe('c64');
+  });
+
+  it('covers SID wave picks, release, filter, and retrigger FX', () => {
+    let saw = newSession('c64');
+    saw = updateInstrument(saw, saw.project.armedInstrumentId, {
+      waveSaw: true,
+      wavePulse: false,
+      waveTriangle: false,
+      waveNoise: false,
+      filterEnable: true,
+      filterCutoff: 800,
+      filterResonance: 12,
+      filterMode: 1,
+      attack: 0,
+      decay: 0,
+      sustain: 8,
+      release: 2,
+    });
+    saw = enterNote(saw, 67);
+    saw = {
+      ...saw,
+      cursor: { ...saw.cursor, row: 2 },
+    };
+    saw = enterCut(saw);
+    const sawRendered = renderSong(songForRender(saw.project));
+    expect(sawRendered.chip).toBe('c64');
+    if (sawRendered.chip === 'c64') {
+      expect(sawRendered.frames[0].voices[0].wave).toBe('saw');
+      expect(sawRendered.frames[0].filterMode).toBe(1);
+    }
+
+    let tri = newSession('c64');
+    tri = updateInstrument(tri, tri.project.armedInstrumentId, {
+      waveTriangle: true,
+      wavePulse: false,
+      waveSaw: false,
+      waveNoise: false,
+      filterEnable: true,
+      filterMode: 2,
+    });
+    tri = enterNote(tri, 60);
+    const triSong = songForRender(tri.project);
+    triSong.patterns[0].rows[0][0] = {
+      ...triSong.patterns[0].rows[0][0],
+      effect: { cmd: 'R', value: 2 },
+    };
+    const triRendered = renderSong(triSong);
+    expect(triRendered.chip).toBe('c64');
+    if (triRendered.chip === 'c64') {
+      expect(triRendered.frames[0].voices[0].wave).toBe('triangle');
+      expect(triRendered.frames[0].filterMode).toBe(2);
+    }
+
+    let noise = newSession('c64');
+    noise = updateInstrument(noise, noise.project.armedInstrumentId, {
+      waveNoise: true,
+      wavePulse: false,
+      filterEnable: false,
+    });
+    noise = enterNote(noise, 40);
+    const noiseRendered = renderSong(songForRender(noise.project));
+    expect(noiseRendered.chip).toBe('c64');
+    if (noiseRendered.chip === 'c64') {
+      expect(noiseRendered.frames[0].voices[0].wave).toBe('noise');
+    }
   });
 });

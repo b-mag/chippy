@@ -15,12 +15,17 @@ import {
   armedInstrument,
   chipDefinition,
   chipIds,
+  chipLabel,
+  findInstrumentIdByNumberLabel,
+  formatEffect,
   formatNote,
   noteFromKey,
   patternDisplayName,
   presetsForChip,
   songForRender,
+  type CellEffect,
   type ColumnId,
+  type EffectCmd,
   type InstrumentKind,
   type InstrumentPreset,
   type Project,
@@ -39,7 +44,7 @@ import { SupportEntitlementService } from '../support-entitlement.service';
 })
 export class TrackerComponent {
   readonly session = inject(SessionService);
-  readonly columns: ColumnId[] = ['note', 'instrument', 'volume'];
+  readonly columns: ColumnId[] = ['note', 'instrument', 'volume', 'effect'];
   private readonly playback = inject(PlaybackService);
   private readonly radio = inject(RadioPlayerService);
   private readonly http = inject(HttpClient);
@@ -90,7 +95,7 @@ export class TrackerComponent {
           index: channelIndex,
           cells: this.columns.map((column) => ({
             column,
-            text: this.label(column, cell.note, cell.cut, cell.instrumentId, cell.volume),
+            text: this.label(column, cell),
             selected: cursor.row === rowIndex && cursor.channel === channelIndex && cursor.column === column,
           })),
         };
@@ -142,6 +147,9 @@ export class TrackerComponent {
         { id: 'vgm' as const, label: 'VGM' },
       ];
     }
+    if (this.project().chip === 'c64') {
+      return [{ id: 'wav' as const, label: 'WAV' }];
+    }
     return [
       { id: 'wav' as const, label: 'WAV' },
       { id: 'ym' as const, label: 'YM6' },
@@ -176,20 +184,66 @@ export class TrackerComponent {
       noise: 'Noise',
       tone: 'Tone',
       snip: 'Snip',
+      sid: 'SID',
     };
     return labels[kind];
   }
 
-  label(column: ColumnId, cellNote: number | null, cut: boolean, instrumentId: string | null, volume: number | null): string {
+  chipOptionLabel(id: string): string {
+    if (id === 'gameboy' || id === 'vectrex' || id === 'c64') {
+      return chipLabel(id);
+    }
+    return id;
+  }
+
+  label(
+    column: ColumnId,
+    cell: { note: number | null; cut: boolean; instrumentId: string | null; volume: number | null; effect: CellEffect | null },
+  ): string {
     if (column === 'note') {
-      if (cut) return 'OFF';
-      if (cellNote === null) return '---';
-      return formatNote(cellNote);
+      if (cell.cut) return 'OFF';
+      if (cell.note === null) return '---';
+      return formatNote(cell.note);
     }
     if (column === 'instrument') {
-      return instrumentId ? instrumentId.replace('ins-', '').replace('snip-', 's') : '.';
+      return this.instrumentNumberLabel(cell.instrumentId);
     }
-    return volume === null ? '..' : volume.toString(16).toUpperCase();
+    if (column === 'effect') {
+      return formatEffect(cell.effect);
+    }
+    return cell.volume === null ? '..' : cell.volume.toString(16).toUpperCase();
+  }
+
+  /** Short id shown in the instrument column and beside names in the studio list. */
+  instrumentNumberLabel(instrumentId: string | null): string {
+    if (!instrumentId) {
+      return '.';
+    }
+    return instrumentId.replace(/^ins-/, '').replace(/^snip-/, 's');
+  }
+
+  columnTooltip(column: ColumnId): string {
+    if (column === 'note') {
+      return 'Note — piano keys write pitch; ` / ~ = cut (OFF)';
+    }
+    if (column === 'instrument') {
+      return 'Instrument — type the panel number (1–9…) to assign; 0 clears';
+    }
+    if (column === 'volume') {
+      return 'Volume — hex 0–F; .. = use instrument level';
+    }
+    return 'FX — A volume slide, D delay, R retrigger (letter then hex value)';
+  }
+
+  private syncArmedFromCursor(): void {
+    const body = this.songBody();
+    const cursor = this.state().cursor;
+    const patternId = body.order[cursor.orderIndex];
+    const pattern = body.patterns.find((item) => item.id === patternId) ?? body.patterns[0];
+    const cell = pattern?.rows[cursor.row]?.[cursor.channel];
+    if (cell?.instrumentId && cell.instrumentId !== this.project().armedInstrumentId) {
+      this.session.arm(cell.instrumentId);
+    }
   }
 
   onKey(event: KeyboardEvent): void {
@@ -219,11 +273,19 @@ export class TrackerComponent {
       this.togglePlay();
       return;
     }
-    if (key === 'ArrowUp') this.session.move(-1, 0, 0);
-    else if (key === 'ArrowDown') this.session.move(1, 0, 0);
-    else if (key === 'ArrowLeft') this.session.move(0, 0, -1);
-    else if (key === 'ArrowRight') this.session.move(0, 0, 1);
-    else if (key === 'Backspace' || key === 'Delete') {
+    if (key === 'ArrowUp') {
+      this.session.move(-1, 0, 0);
+      this.syncArmedFromCursor();
+    } else if (key === 'ArrowDown') {
+      this.session.move(1, 0, 0);
+      this.syncArmedFromCursor();
+    } else if (key === 'ArrowLeft') {
+      this.session.move(0, 0, -1);
+      this.syncArmedFromCursor();
+    } else if (key === 'ArrowRight') {
+      this.session.move(0, 0, 1);
+      this.syncArmedFromCursor();
+    } else if (key === 'Backspace' || key === 'Delete') {
       if (!this.studioFocused()) {
         this.session.clear();
       }
@@ -233,16 +295,35 @@ export class TrackerComponent {
       }
     } else if (key === '[' || key === ']') {
       this.session.octave(this.state().octave + (key === ']' ? 1 : -1));
+    } else if (!this.studioFocused() && this.state().cursor.column === 'instrument') {
+      this.enterInstrumentKey(key);
     } else if (!this.studioFocused() && this.state().cursor.column === 'volume' && /^[0-9a-f]$/i.test(key)) {
       this.session.volume(parseInt(key, 16));
+    } else if (!this.studioFocused() && this.state().cursor.column === 'effect') {
+      this.enterEffectKey(key);
     } else if (this.studioFocused() || this.state().cursor.column === 'note') {
       const midi = noteFromKey(key.toLowerCase(), this.state().octave);
       if (midi !== null) {
         this.auditionMidi(midi);
         if (!this.studioFocused()) {
           this.session.enterNote(midi);
+          this.syncArmedFromCursor();
         }
       }
+    }
+  }
+
+  private enterInstrumentKey(key: string): void {
+    if (key === '0') {
+      this.session.cellInstrument(null);
+      return;
+    }
+    if (!/^[1-9a-f]$/i.test(key)) {
+      return;
+    }
+    const id = findInstrumentIdByNumberLabel(this.project(), key);
+    if (id) {
+      this.session.cellInstrument(id);
     }
   }
 
@@ -497,10 +578,26 @@ export class TrackerComponent {
   place(row: number, channel: number, column: ColumnId): void {
     this.studioFocused.set(false);
     this.session.place(row, channel, column);
+    this.syncArmedFromCursor();
+  }
+
+  private enterEffectKey(key: string): void {
+    const upper = key.toUpperCase();
+    const pattern = this.pattern();
+    const cursor = this.state().cursor;
+    const existing = pattern.rows[cursor.row][cursor.channel]?.effect ?? null;
+    if (upper === 'A' || upper === 'D' || upper === 'R') {
+      this.session.effect({ cmd: upper as EffectCmd, value: existing?.value ?? 0 });
+      return;
+    }
+    if (/^[0-9a-f]$/i.test(key)) {
+      const value = parseInt(key, 16);
+      this.session.effect({ cmd: existing?.cmd ?? 'A', value });
+    }
   }
 
   chipChange(id: string): void {
-    if (id !== 'gameboy' && id !== 'vectrex') {
+    if (id !== 'gameboy' && id !== 'vectrex' && id !== 'c64') {
       return;
     }
     if (id === this.project().chip) {
@@ -519,7 +616,7 @@ export class TrackerComponent {
     void this.finishChipChange(id, saveFirst);
   }
 
-  private async finishChipChange(id: 'gameboy' | 'vectrex', saveFirst: boolean): Promise<void> {
+  private async finishChipChange(id: 'gameboy' | 'vectrex' | 'c64', saveFirst: boolean): Promise<void> {
     if (saveFirst) {
       await this.save();
     }
@@ -527,8 +624,8 @@ export class TrackerComponent {
     this.session.newProjectForChip(id);
     this.status.set(
       saveFirst
-        ? `Saved, then started a new ${id === 'gameboy' ? 'Game Boy' : 'Vectrex'} project.`
-        : `Discarded previous project. New ${id === 'gameboy' ? 'Game Boy' : 'Vectrex'} project.`,
+        ? `Saved, then started a new ${chipLabel(id)} project.`
+        : `Discarded previous project. New ${chipLabel(id)} project.`,
     );
   }
 

@@ -11,19 +11,20 @@ import {
 } from './types';
 
 export function emptyCell(): Cell {
-  return { note: null, cut: false, instrumentId: null, volume: null };
+  return { note: null, cut: false, instrumentId: null, volume: null, effect: null };
 }
 
-export function blankPattern(id: string, name = 'Pattern 1'): Pattern {
+export function blankPattern(id: string, name = 'Pattern 1', channelCount = 4): Pattern {
+  const channels = Math.max(1, channelCount);
   const rows: Cell[][] = [];
   for (let row = 0; row < PATTERN_ROWS; row += 1) {
-    rows.push(Array.from({ length: 4 }, () => emptyCell()));
+    rows.push(Array.from({ length: channels }, () => emptyCell()));
   }
   return { id, name, rows };
 }
 
-export function blankSongBody(id = 'song-1', name = 'Song 1'): SongBody {
-  const pattern = blankPattern('pat-1', 'Pattern 1');
+export function blankSongBody(id = 'song-1', name = 'Song 1', channelCount = 4): SongBody {
+  const pattern = blankPattern('pat-1', 'Pattern 1', channelCount);
   return {
     id,
     name,
@@ -36,7 +37,8 @@ export function blankSongBody(id = 'song-1', name = 'Song 1'): SongBody {
 /** A new project: one song, one pattern, one armed instrument. */
 export function newProject(chip: ChipId, name = 'Untitled'): Project {
   const instrument = chipDefinition(chip).createDefaultInstrument();
-  const song = blankSongBody('song-1', 'Song 1');
+  const channelCount = chipDefinition(chip).channels.length;
+  const song = blankSongBody('song-1', 'Song 1', channelCount);
   return {
     version: PROJECT_VERSION,
     name,

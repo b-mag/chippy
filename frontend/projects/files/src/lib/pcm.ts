@@ -1,4 +1,4 @@
-import { ayPeriod, midiToHz, type AyFrame, type GbFrame, type RenderedSong } from '@chippy/engines';
+import { ayPeriod, midiToHz, type AyFrame, type GbFrame, type RenderedSong, type SidFrame } from '@chippy/engines';
 
 const SAMPLE_RATE = 44100;
 
@@ -6,12 +6,31 @@ function square(phase: number, duty = 0.5): number {
   return phase % 1 < duty ? 0.25 : -0.25;
 }
 
+function saw(phase: number): number {
+  return (phase % 1) * 0.5 - 0.25;
+}
+
+function triangle(phase: number): number {
+  const t = phase % 1;
+  return (t < 0.5 ? t * 4 - 1 : 3 - t * 4) * 0.25;
+}
+
+function waveSample(wave: SidFrame['voices'][0]['wave'], phase: number, pulseWidth: number, noise: number): number {
+  if (wave === 'square') return square(phase, pulseWidth);
+  if (wave === 'saw') return saw(phase);
+  if (wave === 'triangle') return triangle(phase);
+  if (wave === 'noise') return noise & 1 ? 0.2 : -0.2;
+  return 0;
+}
+
 /** Mix rendered frames down to 16-bit mono PCM. This path does not use Web Audio. */
 export function renderPcm(rendered: RenderedSong): Int16Array {
   const samplesPerFrame = Math.round(SAMPLE_RATE / rendered.frameRate);
   const output = new Int16Array(rendered.frames.length * samplesPerFrame);
-  const phases = [0, 0, 0];
+  const phases = [0, 0, 0, 0];
   let noise = 1;
+  let filterLp = 0;
+  let filterBp = 0;
   for (let index = 0; index < rendered.frames.length; index += 1) {
     const frame = rendered.frames[index];
     for (let sample = 0; sample < samplesPerFrame; sample += 1) {
@@ -28,6 +47,33 @@ export function renderPcm(rendered: RenderedSong): Int16Array {
             phases[channel] = (phases[channel] + hz / SAMPLE_RATE) % 1;
           }
         }
+      } else if (rendered.chip === 'c64') {
+        const sid = frame as SidFrame;
+        let dry = 0;
+        let wet = 0;
+        for (let channel = 0; channel < 3; channel += 1) {
+          const voice = sid.voices[channel];
+          if (voice.amp <= 0 || voice.hz <= 0 || voice.wave === 'none') {
+            continue;
+          }
+          noise = (noise >> 1) | (((noise ^ (noise >> 1)) & 1) << 14);
+          const sampleValue = waveSample(voice.wave, phases[channel], voice.pulseWidth, noise) * voice.amp;
+          phases[channel] = (phases[channel] + voice.hz / SAMPLE_RATE) % 1;
+          if (voice.filter) {
+            wet += sampleValue;
+          } else {
+            dry += sampleValue;
+          }
+        }
+        const cutoff = 0.01 + (sid.filterCutoff / 2047) * 0.35;
+        const q = 1 + (sid.filterResonance / 15) * 4;
+        filterBp += cutoff * (wet - filterLp - filterBp / q);
+        filterLp += cutoff * filterBp;
+        const hp = wet - filterLp - filterBp / q;
+        let filtered = filterLp;
+        if (sid.filterMode === 1) filtered = filterBp;
+        if (sid.filterMode === 2) filtered = hp;
+        mixed = dry + filtered * 0.9;
       } else {
         const gb = frame as GbFrame;
         const pulses: Array<[number, number, number]> = [

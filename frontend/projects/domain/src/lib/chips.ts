@@ -43,6 +43,12 @@ const dutyOptions = [
   { value: 3, label: '75%' },
 ];
 
+const filterModeOptions = [
+  { value: 0, label: 'Low' },
+  { value: 1, label: 'Band' },
+  { value: 2, label: 'High' },
+];
+
 const envelopePeriod = { key: 'envelopePeriod' as const, label: 'Envelope period', control: 'number' as const, min: 0, max: 7, kinds: ['pulse', 'noise'] as InstrumentKind[] };
 const envelopeStart = { key: 'envelopeStart' as const, label: 'Envelope level', control: 'number' as const, min: 0, max: 15, kinds: ['pulse', 'noise', 'tone'] as InstrumentKind[] };
 const envelopeDown = { key: 'envelopeDown' as const, label: 'Envelope falls', control: 'toggle' as const, kinds: ['pulse', 'noise'] as InstrumentKind[] };
@@ -61,6 +67,21 @@ function baseInstrument(partial: Partial<Instrument> & Pick<Instrument, 'id' | '
     hardwareEnvelope: false,
     mixNoise: false,
     frames: null,
+    attack: 2,
+    decay: 4,
+    sustain: 10,
+    release: 4,
+    waveTriangle: false,
+    waveSaw: false,
+    wavePulse: true,
+    waveNoise: false,
+    pulseWidth: 2048,
+    ringMod: false,
+    sync: false,
+    filterEnable: false,
+    filterCutoff: 1024,
+    filterResonance: 8,
+    filterMode: 0,
     ...partial,
   };
 }
@@ -80,6 +101,24 @@ function vectrexInstrument(kind: InstrumentKind): Instrument {
     return baseInstrument({ id: 'ins-1', name: 'Snip', kind: 'snip', envelopeDown: false, envelopePeriod: 0, frames: [] });
   }
   return baseInstrument({ id: 'ins-1', name: 'Tone', kind: 'tone', envelopeDown: false, envelopePeriod: 0 });
+}
+
+function c64Instrument(_kind: InstrumentKind): Instrument {
+  return baseInstrument({
+    id: 'ins-1',
+    name: 'SID lead',
+    kind: 'sid',
+    attack: 2,
+    decay: 4,
+    sustain: 10,
+    release: 4,
+    wavePulse: true,
+    waveSaw: false,
+    waveTriangle: false,
+    waveNoise: false,
+    pulseWidth: 2048,
+    filterEnable: false,
+  });
 }
 
 const gameboy: ChipDefinition = {
@@ -168,14 +207,61 @@ const vectrex: ChipDefinition = {
   },
 };
 
-const chips: Record<ChipId, ChipDefinition> = { gameboy, vectrex };
+const c64: ChipDefinition = {
+  id: 'c64',
+  label: 'C64',
+  /** MOS 6581/8580 clocked near 1 MHz on PAL; soft SID uses this for period math. */
+  clockHz: 985_248,
+  frameRate: 50,
+  channels: [
+    { id: 'voice1', label: 'Voice 1', alias: 'VO1' },
+    { id: 'voice2', label: 'Voice 2', alias: 'VO2' },
+    { id: 'voice3', label: 'Voice 3', alias: 'VO3' },
+  ],
+  kinds: ['sid'],
+  fields: [
+    { key: 'attack', label: 'Attack', control: 'number', min: 0, max: 15, kinds: ['sid'] },
+    { key: 'decay', label: 'Decay', control: 'number', min: 0, max: 15, kinds: ['sid'] },
+    { key: 'sustain', label: 'Sustain', control: 'number', min: 0, max: 15, kinds: ['sid'] },
+    { key: 'release', label: 'Release', control: 'number', min: 0, max: 15, kinds: ['sid'] },
+    { key: 'waveTriangle', label: 'Triangle', control: 'toggle', kinds: ['sid'] },
+    { key: 'waveSaw', label: 'Saw', control: 'toggle', kinds: ['sid'] },
+    { key: 'wavePulse', label: 'Pulse', control: 'toggle', kinds: ['sid'] },
+    { key: 'waveNoise', label: 'Noise', control: 'toggle', kinds: ['sid'] },
+    { key: 'pulseWidth', label: 'Pulse width', control: 'number', min: 0, max: 4095, kinds: ['sid'] },
+    { key: 'ringMod', label: 'Ring mod', control: 'toggle', kinds: ['sid'] },
+    { key: 'sync', label: 'Sync', control: 'toggle', kinds: ['sid'] },
+    { key: 'filterEnable', label: 'Filter', control: 'toggle', kinds: ['sid'] },
+    { key: 'filterCutoff', label: 'Cutoff', control: 'number', min: 0, max: 2047, kinds: ['sid'] },
+    { key: 'filterResonance', label: 'Resonance', control: 'number', min: 0, max: 15, kinds: ['sid'] },
+    { key: 'filterMode', label: 'Filter mode', control: 'select', options: filterModeOptions, kinds: ['sid'] },
+  ],
+  createDefaultInstrument() {
+    return c64Instrument('sid');
+  },
+  createInstrument(kind: InstrumentKind) {
+    if (!this.kinds.includes(kind)) {
+      return this.createDefaultInstrument();
+    }
+    return c64Instrument(kind);
+  },
+  kindsForChannel() {
+    return ['sid'];
+  },
+};
+
+const chips: Record<ChipId, ChipDefinition> = { gameboy, vectrex, c64 };
 
 export function chipDefinition(id: ChipId): ChipDefinition {
   return chips[id];
 }
 
 export function chipIds(): ChipId[] {
-  return ['gameboy', 'vectrex'];
+  return ['gameboy', 'vectrex', 'c64'];
+}
+
+export function chipLabel(id: ChipId): string {
+  return chipDefinition(id).label;
 }
 
 /** First channel id that can play this instrument kind on the chip. */

@@ -1,14 +1,20 @@
 import {
   LEGACY_PROJECT_VERSION,
   PROJECT_VERSION,
+  baseInstrument,
+  type Cell,
+  type CellEffect,
   type ChipId,
+  type EffectCmd,
   type Instrument,
+  type InstrumentKind,
   type Pattern,
   type Project,
   type SongBody,
 } from '@chippy/domain';
 
-const CHIP_IDS: ChipId[] = ['gameboy', 'vectrex'];
+const CHIP_IDS: ChipId[] = ['gameboy', 'vectrex', 'c64'];
+const EFFECT_CMDS = new Set<EffectCmd>(['A', 'D', 'R']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -16,6 +22,53 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function reject(message: string): never {
   throw new Error(message);
+}
+
+function normalizeInstrument(raw: unknown, index: number): Instrument {
+  if (!isRecord(raw)) {
+    return baseInstrument({ id: `ins-${index + 1}`, name: `Instrument ${index + 1}`, kind: 'pulse' });
+  }
+  const kind = (typeof raw['kind'] === 'string' ? raw['kind'] : 'pulse') as InstrumentKind;
+  const id = typeof raw['id'] === 'string' && raw['id'] ? String(raw['id']) : `ins-${index + 1}`;
+  const name = typeof raw['name'] === 'string' && raw['name'] ? String(raw['name']) : `Instrument ${index + 1}`;
+  return baseInstrument({
+    ...(raw as Partial<Instrument>),
+    id,
+    name,
+    kind,
+  });
+}
+
+function normalizeInstruments(raw: unknown[]): Instrument[] {
+  return raw.map((item, index) => normalizeInstrument(item, index));
+}
+
+function normalizeEffect(raw: unknown): CellEffect | null {
+  if (!isRecord(raw)) {
+    return null;
+  }
+  const cmd = raw['cmd'];
+  const value = raw['value'];
+  if (typeof cmd !== 'string' || !EFFECT_CMDS.has(cmd as EffectCmd)) {
+    return null;
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return null;
+  }
+  return { cmd: cmd as EffectCmd, value: Math.min(15, Math.max(0, Math.floor(value))) };
+}
+
+function normalizeCell(raw: unknown): Cell {
+  if (!isRecord(raw)) {
+    return { note: null, cut: false, instrumentId: null, volume: null, effect: null };
+  }
+  return {
+    note: typeof raw['note'] === 'number' ? raw['note'] : null,
+    cut: Boolean(raw['cut']),
+    instrumentId: typeof raw['instrumentId'] === 'string' ? raw['instrumentId'] : null,
+    volume: typeof raw['volume'] === 'number' ? raw['volume'] : null,
+    effect: normalizeEffect(raw['effect']),
+  };
 }
 
 function normalizePatterns(patterns: Pattern[]): Pattern[] {
@@ -27,7 +80,11 @@ function normalizePatterns(patterns: Pattern[]): Pattern[] {
     const name = typeof record['name'] === 'string' && record['name'].trim()
       ? String(record['name']).trim().slice(0, 40)
       : `Pattern ${index + 1}`;
-    return { ...pattern, name };
+    const rows = Array.isArray(record['rows'])
+      ? (record['rows'] as unknown[]).map((row) =>
+          Array.isArray(row) ? row.map((cell) => normalizeCell(cell)) : [])
+      : pattern.rows.map((row) => row.map((cell) => normalizeCell(cell)));
+    return { ...pattern, name, rows };
   });
 }
 
@@ -54,9 +111,13 @@ function normalizeSongBody(raw: Record<string, unknown>, index: number): SongBod
   };
 }
 
+function isChipId(value: unknown): value is ChipId {
+  return value === 'gameboy' || value === 'vectrex' || value === 'c64';
+}
+
 function migrateV1(parsed: Record<string, unknown>): Project {
   const chip = parsed['chip'];
-  if (chip !== 'gameboy' && chip !== 'vectrex') {
+  if (!isChipId(chip)) {
     reject('Unknown chip.');
   }
   if (!Array.isArray(parsed['patterns']) || parsed['patterns'].length === 0) {
@@ -79,7 +140,7 @@ function migrateV1(parsed: Record<string, unknown>): Project {
     version: PROJECT_VERSION,
     name: typeof parsed['name'] === 'string' ? String(parsed['name']) : 'Untitled',
     chip,
-    instruments: parsed['instruments'] as Instrument[],
+    instruments: normalizeInstruments(parsed['instruments'] as unknown[]),
     armedInstrumentId: String(parsed['armedInstrumentId'] ?? ''),
     songs: [body],
     activeSongId: body.id,
@@ -96,7 +157,7 @@ function parseV2(parsed: Record<string, unknown>): Project {
     }
   }
   const chip = parsed['chip'];
-  if (chip !== 'gameboy' && chip !== 'vectrex') {
+  if (!isChipId(chip)) {
     reject('Unknown chip.');
   }
   if (!Array.isArray(parsed['instruments']) || parsed['instruments'].length === 0) {
@@ -118,7 +179,7 @@ function parseV2(parsed: Record<string, unknown>): Project {
     version: PROJECT_VERSION,
     name: typeof parsed['name'] === 'string' ? String(parsed['name']) : 'Untitled',
     chip,
-    instruments: parsed['instruments'] as Instrument[],
+    instruments: normalizeInstruments(parsed['instruments'] as unknown[]),
     armedInstrumentId: String(parsed['armedInstrumentId'] ?? ''),
     songs,
     activeSongId,
