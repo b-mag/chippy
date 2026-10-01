@@ -3,7 +3,8 @@ import type { ChipId, Instrument, InstrumentKind } from './types';
 export interface InstrumentField {
   key: keyof Instrument;
   label: string;
-  control: 'select' | 'number' | 'toggle';
+  /** knob = rotary + linked number; macro = space-separated step list. */
+  control: 'select' | 'number' | 'toggle' | 'knob' | 'macro';
   min?: number;
   max?: number;
   options?: { value: number | boolean | string; label: string }[];
@@ -49,9 +50,20 @@ const filterModeOptions = [
   { value: 2, label: 'High' },
 ];
 
-const envelopePeriod = { key: 'envelopePeriod' as const, label: 'Envelope period', control: 'number' as const, min: 0, max: 7, kinds: ['pulse', 'noise'] as InstrumentKind[] };
-const envelopeStart = { key: 'envelopeStart' as const, label: 'Envelope level', control: 'number' as const, min: 0, max: 15, kinds: ['pulse', 'noise', 'tone'] as InstrumentKind[] };
+const envelopePeriod = { key: 'envelopePeriod' as const, label: 'Envelope period', control: 'knob' as const, min: 0, max: 7, kinds: ['pulse', 'noise'] as InstrumentKind[] };
+const envelopeStart = { key: 'envelopeStart' as const, label: 'Envelope level', control: 'knob' as const, min: 0, max: 15, kinds: ['pulse', 'noise', 'tone'] as InstrumentKind[] };
 const envelopeDown = { key: 'envelopeDown' as const, label: 'Envelope falls', control: 'toggle' as const, kinds: ['pulse', 'noise'] as InstrumentKind[] };
+
+const ayEnvelopeShapes = [
+  { value: 0x08, label: 'Fall repeat' },
+  { value: 0x09, label: 'Fall hold' },
+  { value: 0x0a, label: 'Fall / rise' },
+  { value: 0x0b, label: 'Fall then high' },
+  { value: 0x0c, label: 'Rise repeat' },
+  { value: 0x0d, label: 'Rise hold' },
+  { value: 0x0e, label: 'Rise / fall' },
+  { value: 0x0f, label: 'Rise then low' },
+];
 
 function baseInstrument(partial: Partial<Instrument> & Pick<Instrument, 'id' | 'name' | 'kind'>): Instrument {
   return {
@@ -66,6 +78,12 @@ function baseInstrument(partial: Partial<Instrument> & Pick<Instrument, 'id' | '
     noiseShort: false,
     hardwareEnvelope: false,
     mixNoise: false,
+    noisePeriod: 8,
+    hardwareEnvelopePeriod: 0x1000,
+    hardwareEnvelopeShape: 0x0e,
+    volumeMacro: null,
+    pitchMacro: null,
+    noiseMacro: null,
     frames: null,
     attack: 2,
     decay: 4,
@@ -139,8 +157,8 @@ const gameboy: ChipDefinition = {
     envelopeStart,
     envelopeDown,
     envelopePeriod,
-    { key: 'sweepTime', label: 'Sweep time', control: 'number', min: 0, max: 7, kinds: ['pulse'], channelId: 'pulse1' },
-    { key: 'sweepShift', label: 'Sweep shift', control: 'number', min: 0, max: 7, kinds: ['pulse'], channelId: 'pulse1' },
+    { key: 'sweepTime', label: 'Sweep time', control: 'knob', min: 0, max: 7, kinds: ['pulse'], channelId: 'pulse1' },
+    { key: 'sweepShift', label: 'Sweep shift', control: 'knob', min: 0, max: 7, kinds: ['pulse'], channelId: 'pulse1' },
     { key: 'sweepDown', label: 'Sweep down', control: 'toggle', kinds: ['pulse'], channelId: 'pulse1' },
     {
       key: 'waveform',
@@ -189,9 +207,30 @@ const vectrex: ChipDefinition = {
   ],
   kinds: ['tone', 'snip'],
   fields: [
-    envelopeStart,
+    { key: 'envelopeStart', label: 'Level', control: 'knob', min: 0, max: 15, kinds: ['tone'] },
+    { key: 'envelopeDown', label: 'Soft env falls', control: 'toggle', kinds: ['tone'] },
+    { key: 'envelopePeriod', label: 'Soft env rate', control: 'knob', min: 0, max: 7, kinds: ['tone'] },
     { key: 'hardwareEnvelope', label: 'Hardware envelope', control: 'toggle', kinds: ['tone'] },
+    {
+      key: 'hardwareEnvelopePeriod',
+      label: 'HW env period',
+      control: 'knob',
+      min: 0,
+      max: 65535,
+      kinds: ['tone'],
+    },
+    {
+      key: 'hardwareEnvelopeShape',
+      label: 'HW env shape',
+      control: 'select',
+      options: ayEnvelopeShapes,
+      kinds: ['tone'],
+    },
     { key: 'mixNoise', label: 'Noise', control: 'toggle', kinds: ['tone'] },
+    { key: 'noisePeriod', label: 'Noise period', control: 'knob', min: 0, max: 31, kinds: ['tone'] },
+    { key: 'volumeMacro', label: 'Volume macro', control: 'macro', min: 0, max: 15, kinds: ['tone'] },
+    { key: 'pitchMacro', label: 'Pitch macro', control: 'macro', min: -24, max: 24, kinds: ['tone'] },
+    { key: 'noiseMacro', label: 'Noise macro', control: 'macro', min: 0, max: 31, kinds: ['tone'] },
   ],
   createDefaultInstrument() {
     return vectrexInstrument('tone');
@@ -220,20 +259,20 @@ const c64: ChipDefinition = {
   ],
   kinds: ['sid'],
   fields: [
-    { key: 'attack', label: 'Attack', control: 'number', min: 0, max: 15, kinds: ['sid'] },
-    { key: 'decay', label: 'Decay', control: 'number', min: 0, max: 15, kinds: ['sid'] },
-    { key: 'sustain', label: 'Sustain', control: 'number', min: 0, max: 15, kinds: ['sid'] },
-    { key: 'release', label: 'Release', control: 'number', min: 0, max: 15, kinds: ['sid'] },
+    { key: 'attack', label: 'Attack', control: 'knob', min: 0, max: 15, kinds: ['sid'] },
+    { key: 'decay', label: 'Decay', control: 'knob', min: 0, max: 15, kinds: ['sid'] },
+    { key: 'sustain', label: 'Sustain', control: 'knob', min: 0, max: 15, kinds: ['sid'] },
+    { key: 'release', label: 'Release', control: 'knob', min: 0, max: 15, kinds: ['sid'] },
     { key: 'waveTriangle', label: 'Triangle', control: 'toggle', kinds: ['sid'] },
     { key: 'waveSaw', label: 'Saw', control: 'toggle', kinds: ['sid'] },
     { key: 'wavePulse', label: 'Pulse', control: 'toggle', kinds: ['sid'] },
     { key: 'waveNoise', label: 'Noise', control: 'toggle', kinds: ['sid'] },
-    { key: 'pulseWidth', label: 'Pulse width', control: 'number', min: 0, max: 4095, kinds: ['sid'] },
+    { key: 'pulseWidth', label: 'Pulse width', control: 'knob', min: 0, max: 4095, kinds: ['sid'] },
     { key: 'ringMod', label: 'Ring mod', control: 'toggle', kinds: ['sid'] },
     { key: 'sync', label: 'Sync', control: 'toggle', kinds: ['sid'] },
     { key: 'filterEnable', label: 'Filter', control: 'toggle', kinds: ['sid'] },
-    { key: 'filterCutoff', label: 'Cutoff', control: 'number', min: 0, max: 2047, kinds: ['sid'] },
-    { key: 'filterResonance', label: 'Resonance', control: 'number', min: 0, max: 15, kinds: ['sid'] },
+    { key: 'filterCutoff', label: 'Cutoff', control: 'knob', min: 0, max: 2047, kinds: ['sid'] },
+    { key: 'filterResonance', label: 'Resonance', control: 'knob', min: 0, max: 15, kinds: ['sid'] },
     { key: 'filterMode', label: 'Filter mode', control: 'select', options: filterModeOptions, kinds: ['sid'] },
   ],
   createDefaultInstrument() {

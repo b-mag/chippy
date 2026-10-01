@@ -65,16 +65,56 @@ describe('renderSong', () => {
     expect(rendered.frames[0].nr44).toBe(0x80);
   });
 
+  it('applies vectrex soft envelope, volume macro, and pitch macro', () => {
+    let state = newSession('vectrex');
+    const id = state.project.armedInstrumentId;
+    state = updateInstrument(state, id, {
+      envelopeStart: 10,
+      envelopeDown: true,
+      envelopePeriod: 1,
+      hardwareEnvelope: false,
+      volumeMacro: null,
+      pitchMacro: [0, 12],
+    });
+    state = enterNote(state, 57);
+    const ay = renderSong(songForRender(state.project));
+    expect(ay.chip).toBe('vectrex');
+    if (ay.chip === 'vectrex') {
+      expect(ay.frames[0][8] & 0x0f).toBe(10);
+      expect(ay.frames[1][8] & 0x0f).toBe(9);
+      const period0 = ay.frames[0][0] | ((ay.frames[0][1] & 0x0f) << 8);
+      const period1 = ay.frames[1][0] | ((ay.frames[1][1] & 0x0f) << 8);
+      expect(period1).toBeLessThan(period0);
+    }
+    state = updateInstrument(state, id, { volumeMacro: [15, 1], pitchMacro: null, envelopePeriod: 0 });
+    const withMacro = renderSong(songForRender(state.project));
+    if (withMacro.chip === 'vectrex') {
+      expect(withMacro.frames[0][8] & 0x0f).toBe(15);
+      expect(withMacro.frames[1][8] & 0x0f).toBe(1);
+    }
+  });
+
   it('applies vectrex noise mix, hardware envelope, and gb envelope rise', () => {
     let state = newSession('vectrex');
     const id = state.project.armedInstrumentId;
-    state = updateInstrument(state, id, { mixNoise: true, hardwareEnvelope: true, envelopeStart: 10 });
+    state = updateInstrument(state, id, {
+      mixNoise: true,
+      noisePeriod: 12,
+      hardwareEnvelope: true,
+      hardwareEnvelopePeriod: 0x1234,
+      hardwareEnvelopeShape: 0x0a,
+      envelopeStart: 10,
+    });
     state = enterNote(state, 69);
     const ay = renderSong(songForRender(state.project));
     expect(ay.chip).toBe('vectrex');
     if (ay.chip === 'vectrex') {
       expect(ay.frames[0][8] & 0x10).toBe(0x10);
       expect(ay.frames[0][7] & 0x08).toBe(0);
+      expect(ay.frames[0][6]).toBe(12);
+      expect(ay.frames[0][11]).toBe(0x34);
+      expect(ay.frames[0][12]).toBe(0x12);
+      expect(ay.frames[0][13]).toBe(0x0a);
     }
     let gb = newSession('gameboy');
     gb = updateInstrument(gb, gb.project.armedInstrumentId, { envelopeDown: false, sweepTime: 2, sweepShift: 1, sweepDown: false });

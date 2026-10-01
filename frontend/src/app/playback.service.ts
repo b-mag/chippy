@@ -6,7 +6,7 @@ import {
   PATTERN_ROWS,
   type Song,
 } from '@chippy/domain';
-import { renderSong, type AyFrame, type GbFrame, type SidFrame } from '@chippy/engines';
+import { renderSong, type AyFrame, type GbFrame, type RenderedSong, type SidFrame } from '@chippy/engines';
 
 export type LoopMode = 'off' | 'pattern' | 'song';
 
@@ -29,13 +29,27 @@ export class PlaybackService {
   private auditionTimer = 0;
   private context: AudioContext | null = null;
   private gains: GainNode[] = [];
+  private noiseNodes: AudioBufferSourceNode[] = [];
+  private noiseGains: GainNode[] = [];
+  private rendered: RenderedSong | null = null;
+  private absoluteRow = 0;
+  private playOrderIndex = 0;
+  private loopMode: LoopMode = 'off';
+  private mutedChannels = new Set<number>();
+  private soloChannels = new Set<number>();
+  private songRows = 0;
+  private envShape = 0x0e;
+  private envPeriod = 0x1000;
+  private envClock = 0;
 
   /**
    * Play a short engine-rendered one-shot of the armed instrument at `midi`.
-   * Does not disturb song playback scheduling state beyond a brief overlay
-   * when nothing else is playing.
+   * Skipped while song playback is active so pattern-loop tweaks stay clear.
    */
   audition(song: Song, midi: number): void {
+    if (this.playing()) {
+      return;
+    }
     const instrument = song.instruments.find((item) => item.id === song.armedInstrumentId) ?? song.instruments[0];
     const channel = auditionChannelIndex(song.chip, instrument.kind);
     const channelCount = chipDefinition(song.chip).channels.length;
@@ -61,13 +75,7 @@ export class PlaybackService {
     };
     const rendered = renderSong(preview);
     const context = this.ensure();
-    const voiceCount = channelCount;
-    const resumeSong = this.playing();
-    if (!resumeSong) {
-      this.prepareVoices(context, voiceCount);
-    } else if (this.gains.length !== voiceCount) {
-      this.prepareVoices(context, voiceCount);
-    }
+    this.prepareVoices(context, channelCount);
     window.clearInterval(this.auditionTimer);
     const framesToPlay = Math.min(rendered.frames.length, rendered.framesPerRow * 5);
     let index = 0;
@@ -77,11 +85,12 @@ export class PlaybackService {
       if (index >= framesToPlay) {
         window.clearInterval(this.auditionTimer);
         this.auditionTimer = 0;
-        if (!resumeSong) {
-          this.gains.forEach((gain) => {
-            gain.gain.value = 0;
-          });
-        }
+        this.gains.forEach((gain) => {
+          gain.gain.value = 0;
+        });
+        this.noiseGains.forEach((gain) => {
+          gain.gain.value = 0;
+        });
         return;
       }
       this.applyFrame(rendered.chip, rendered.frames[index], emptyMute, emptySolo);
@@ -100,39 +109,63 @@ export class PlaybackService {
     this.row.set(null);
     this.orderIndex.set(null);
     this.tick.set(null);
+    this.rendered = null;
     this.gains.forEach((gain) => { gain.gain.value = 0; });
+    this.noiseGains.forEach((gain) => { gain.gain.value = 0; });
+  }
+
+  /**
+   * Re-render the active song into the play buffer without resetting the playhead.
+   * Used so instrument studio edits are heard while a pattern/song loop runs.
+   */
+  hotReload(song: Song): void {
+    if (!this.playing() || this.timer === 0) {
+      return;
+    }
+    this.rendered = renderSong(song);
+    this.songRows = song.order.length * PATTERN_ROWS;
   }
 
   play(song: Song, orderIndex: number, fromRow: number, loop: LoopMode, muted: Set<number>, solo: Set<number>): void {
     this.stop();
-    const rendered = renderSong(song);
+    this.rendered = renderSong(song);
     const context = this.ensure();
     this.prepareVoices(context, chipDefinition(song.chip).channels.length);
-    const perRow = rendered.framesPerRow;
-    const patternRows = 16;
-    const orderCount = song.order.length;
-    const songRows = orderCount * patternRows;
-    let absoluteRow = orderIndex * patternRows + fromRow;
+    this.playOrderIndex = orderIndex;
+    this.loopMode = loop;
+    this.mutedChannels = new Set(muted);
+    this.soloChannels = new Set(solo);
+    this.songRows = song.order.length * PATTERN_ROWS;
+    this.absoluteRow = orderIndex * PATTERN_ROWS + fromRow;
+    this.envClock = 0;
     const rowMs = 60000 / (song.tempo * 4);
     this.playing.set(true);
     const tick = () => {
-      if (loop === 'song' && absoluteRow >= songRows) {
-        absoluteRow = 0;
+      const rendered = this.rendered;
+      if (!rendered) {
+        this.stop();
+        return;
       }
-      let localOrder = Math.floor(absoluteRow / patternRows) % orderCount;
-      if (loop === 'pattern' && localOrder !== orderIndex) {
-        absoluteRow = orderIndex * patternRows;
-        localOrder = orderIndex;
+      const orderCount = Math.max(1, Math.floor(this.songRows / PATTERN_ROWS));
+      if (this.loopMode === 'song' && this.absoluteRow >= this.songRows) {
+        this.absoluteRow = 0;
       }
-      const localRow = absoluteRow % patternRows;
-      const frameRow = loop === 'pattern' ? orderIndex * patternRows + localRow : absoluteRow % songRows;
-      const frameIndex = Math.min(rendered.frames.length - 1, frameRow * perRow);
-      this.applyFrame(rendered.chip, rendered.frames[frameIndex], muted, solo);
+      let localOrder = Math.floor(this.absoluteRow / PATTERN_ROWS) % orderCount;
+      if (this.loopMode === 'pattern' && localOrder !== this.playOrderIndex) {
+        this.absoluteRow = this.playOrderIndex * PATTERN_ROWS;
+        localOrder = this.playOrderIndex;
+      }
+      const localRow = this.absoluteRow % PATTERN_ROWS;
+      const frameRow = this.loopMode === 'pattern'
+        ? this.playOrderIndex * PATTERN_ROWS + localRow
+        : this.absoluteRow % this.songRows;
+      const frameIndex = Math.min(rendered.frames.length - 1, frameRow * rendered.framesPerRow);
+      this.applyFrame(rendered.chip, rendered.frames[frameIndex], this.mutedChannels, this.soloChannels);
       this.row.set(localRow);
       this.orderIndex.set(localOrder);
       this.tick.set({ orderIndex: localOrder, row: localRow });
-      absoluteRow += 1;
-      if (loop === 'off' && absoluteRow >= songRows) {
+      this.absoluteRow += 1;
+      if (this.loopMode === 'off' && this.absoluteRow >= this.songRows) {
         this.stop();
       }
     };
@@ -150,12 +183,32 @@ export class PlaybackService {
     return this.context;
   }
 
+  private noiseBuffer(context: AudioContext): AudioBuffer {
+    const length = context.sampleRate;
+    const buffer = context.createBuffer(1, length, context.sampleRate);
+    const data = buffer.getChannelData(0);
+    let lfsr = 1;
+    for (let index = 0; index < length; index += 1) {
+      lfsr = (lfsr >> 1) | (((lfsr ^ (lfsr >> 1)) & 1) << 14);
+      data[index] = lfsr & 1 ? 0.25 : -0.25;
+    }
+    return buffer;
+  }
+
   private prepareVoices(context: AudioContext, count: number): void {
-    if (this.gains.length === count) {
+    if (this.gains.length === count && this.noiseGains.length === count) {
       return;
     }
     this.gains.forEach((gain) => gain.disconnect());
+    this.noiseNodes.forEach((node) => {
+      try { node.stop(); } catch { /* already stopped */ }
+      node.disconnect();
+    });
+    this.noiseGains.forEach((gain) => gain.disconnect());
     this.gains = [];
+    this.noiseNodes = [];
+    this.noiseGains = [];
+    const buffer = this.noiseBuffer(context);
     for (let index = 0; index < count; index += 1) {
       const oscillator = context.createOscillator();
       const gain = context.createGain();
@@ -166,7 +219,40 @@ export class PlaybackService {
       oscillator.start();
       this.gains.push(gain);
       (gain as GainNode & { oscillator?: OscillatorNode }).oscillator = oscillator;
+
+      const noiseGain = context.createGain();
+      noiseGain.gain.value = 0;
+      const noise = context.createBufferSource();
+      noise.buffer = buffer;
+      noise.loop = true;
+      noise.connect(noiseGain).connect(context.destination);
+      noise.start();
+      this.noiseNodes.push(noise);
+      this.noiseGains.push(noiseGain);
     }
+  }
+
+  private hardwareEnvelopeLevel(shape: number, phase: number): number {
+    const continueBit = (shape & 0x08) !== 0;
+    const attack = (shape & 0x04) !== 0;
+    const alternate = (shape & 0x02) !== 0;
+    const hold = (shape & 0x01) !== 0;
+    if (!continueBit) {
+      const cycle = phase % 32;
+      if (attack) {
+        return cycle < 16 ? cycle / 15 : 0;
+      }
+      return cycle < 16 ? (15 - cycle) / 15 : 0;
+    }
+    if (hold && phase >= 16) {
+      const endHigh = alternate ? !attack : attack;
+      return endHigh ? 1 : 0;
+    }
+    if (alternate && Math.floor(phase / 16) % 2 === 1) {
+      return (15 - (phase % 16)) / 15;
+    }
+    const step = phase % 16;
+    return attack ? step / 15 : (15 - step) / 15;
   }
 
   private applyFrame(
@@ -181,17 +267,47 @@ export class PlaybackService {
     const audible = (channel: number) => (solo.size > 0 ? solo.has(channel) : !muted.has(channel));
     if (chip === 'vectrex') {
       const ay = frame as AyFrame;
+      const mixer = ay[7] ?? 0x3f;
+      const noisePeriod = (ay[6] & 0x1f) || 1;
+      const noiseRate = Math.max(0.25, 8 / noisePeriod);
+      const envPeriod = ((ay[12] & 0xff) << 8) | (ay[11] & 0xff);
+      if (envPeriod > 0) {
+        this.envPeriod = envPeriod;
+      }
+      if ((ay[13] & 0x0f) !== 0 || ay[13] === 0) {
+        // Shape register is only meaningful when written; keep last shape when zeroed frames appear.
+        if (ay[8] & 0x10 || ay[9] & 0x10 || ay[10] & 0x10) {
+          this.envShape = ay[13] & 0x0f;
+        }
+      }
+      this.envClock += 1;
+      const envStep = Math.floor(this.envClock / Math.max(1, Math.floor(this.envPeriod / 256) || 1));
       for (let channel = 0; channel < 3; channel += 1) {
         const node = this.gains[channel] as GainNode & { oscillator?: OscillatorNode };
+        const noiseGain = this.noiseGains[channel];
         const period = ay[channel * 2] | ((ay[channel * 2 + 1] & 0x0f) << 8);
-        const on = (ay[7] & (1 << channel)) === 0 && period > 0 && audible(channel);
-        node.gain.value = on ? ((ay[8 + channel] & 0x0f) / 15) * 0.12 : 0;
-        if (on && node.oscillator) {
+        const toneOn = (mixer & (1 << channel)) === 0 && period > 0 && audible(channel);
+        const noiseOn = (mixer & (1 << (channel + 3))) === 0 && audible(channel);
+        const volReg = ay[8 + channel] ?? 0;
+        const useEnv = (volReg & 0x10) !== 0;
+        const level = useEnv
+          ? this.hardwareEnvelopeLevel(this.envShape, envStep)
+          : (volReg & 0x0f) / 15;
+        node.gain.value = toneOn ? level * 0.12 : 0;
+        if (toneOn && node.oscillator) {
           node.oscillator.frequency.value = 1_500_000 / (16 * period);
+        }
+        if (noiseGain) {
+          noiseGain.gain.value = noiseOn ? level * 0.08 : 0;
+          const noiseNode = this.noiseNodes[channel];
+          if (noiseNode) {
+            noiseNode.playbackRate.value = noiseRate;
+          }
         }
       }
       return;
     }
+    this.noiseGains.forEach((gain) => { gain.gain.value = 0; });
     if (chip === 'c64') {
       const sid = frame as SidFrame;
       for (let channel = 0; channel < 3; channel += 1) {

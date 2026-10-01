@@ -78,6 +78,16 @@ export class TrackerComponent {
   readonly studioFocused = signal(false);
   readonly lastAuditionMidi = signal(60);
   readonly presetStatus = signal('');
+  private knobDrag: {
+    key: string;
+    min: number;
+    max: number;
+    startY: number;
+    startValue: number;
+  } | null = null;
+  private hotReloadFrame: number | null = null;
+  private readonly onKnobPointerMove = (event: PointerEvent): void => this.moveKnobDrag(event);
+  private readonly onKnobPointerUp = (): void => this.endKnobDrag();
 
   readonly project = computed(() => this.state().project);
   readonly song = computed(() => songForRender(this.state().project));
@@ -381,21 +391,127 @@ export class TrackerComponent {
     return instrument[key] ?? '';
   }
 
-  patchField(key: string, raw: string, control: string): void {
+  numericField(key: string): number {
+    const value = this.fieldValue(key);
+    return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  }
+
+  macroText(key: string): string {
+    const instrument = this.armed() as unknown as Record<string, unknown>;
+    const macro = instrument[key];
+    if (!Array.isArray(macro) || macro.length === 0) {
+      return '';
+    }
+    return macro.map((step) => Number(step).toString(16).toUpperCase()).join(' ');
+  }
+
+  knobAngle(key: string, min: number, max: number): number {
+    const span = Math.max(1, max - min);
+    const ratio = (this.numericField(key) - min) / span;
+    return -135 + ratio * 270;
+  }
+
+  startKnobDrag(event: PointerEvent, key: string, min: number, max: number): void {
+    event.preventDefault();
+    (event.target as HTMLElement).setPointerCapture?.(event.pointerId);
+    this.knobDrag = {
+      key,
+      min,
+      max,
+      startY: event.clientY,
+      startValue: this.numericField(key),
+    };
+    window.addEventListener('pointermove', this.onKnobPointerMove);
+    window.addEventListener('pointerup', this.onKnobPointerUp);
+  }
+
+  private moveKnobDrag(event: PointerEvent): void {
+    if (!this.knobDrag) {
+      return;
+    }
+    const { key, min, max, startY, startValue } = this.knobDrag;
+    const span = Math.max(1, max - min);
+    const pixelsPerStep = Math.max(2, 120 / span);
+    const delta = Math.round((startY - event.clientY) / pixelsPerStep);
+    const next = Math.min(max, Math.max(min, startValue + delta));
+    this.patchField(key, String(next), 'number', true);
+  }
+
+  private endKnobDrag(): void {
+    this.knobDrag = null;
+    window.removeEventListener('pointermove', this.onKnobPointerMove);
+    window.removeEventListener('pointerup', this.onKnobPointerUp);
+    if (!this.playback.playing()) {
+      this.auditionMidi(this.lastAuditionMidi());
+    }
+  }
+
+  patchMacro(key: string, raw: string, min: number, max: number): void {
+    const steps = raw
+      .trim()
+      .split(/[\s,]+/)
+      .filter(Boolean)
+      .map((token) => {
+        let parsed: number;
+        if (/^[+-]?\d+$/.test(token)) {
+          parsed = Number(token);
+        } else if (/^[0-9a-fA-F]+$/.test(token)) {
+          parsed = Number.parseInt(token, 16);
+        } else {
+          return null;
+        }
+        if (!Number.isFinite(parsed)) {
+          return null;
+        }
+        return Math.min(max, Math.max(min, Math.round(parsed)));
+      })
+      .filter((step): step is number => step !== null);
+    this.session.updateInstrument(this.armed().id, {
+      [key]: steps.length > 0 ? steps : null,
+    } as Partial<import('@chippy/domain').Instrument>);
+    this.afterInstrumentPatch();
+  }
+
+  patchField(key: string, raw: string, control: string, live = false): void {
     let value: string | number | boolean = raw;
     if (control === 'number' || control === 'select') {
       value = Number(raw);
+      if (!Number.isFinite(value)) {
+        return;
+      }
     }
     if (control === 'toggle') {
       value = raw === 'true';
     }
     this.session.updateInstrument(this.armed().id, { [key]: value } as Partial<import('@chippy/domain').Instrument>);
+    this.afterInstrumentPatch(live);
+  }
+
+  private afterInstrumentPatch(live = false): void {
+    if (this.playback.playing()) {
+      this.scheduleHotReload();
+      return;
+    }
+    if (!live || !this.knobDrag) {
+      this.auditionMidi(this.lastAuditionMidi());
+      return;
+    }
     this.auditionMidi(this.lastAuditionMidi());
+  }
+
+  private scheduleHotReload(): void {
+    if (this.hotReloadFrame !== null) {
+      return;
+    }
+    this.hotReloadFrame = window.requestAnimationFrame(() => {
+      this.hotReloadFrame = null;
+      this.playback.hotReload(this.song());
+    });
   }
 
   changeKind(raw: string): void {
     this.session.changeInstrumentKind(this.armed().id, raw as InstrumentKind);
-    this.auditionMidi(this.lastAuditionMidi());
+    this.afterInstrumentPatch();
   }
 
   beginRename(id: string, name: string): void {

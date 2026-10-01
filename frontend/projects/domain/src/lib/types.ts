@@ -66,10 +66,26 @@ export interface Instrument {
   /** Index into the built-in Game Boy waveforms. */
   waveform: number;
   noiseShort: boolean;
-  /** AY hardware envelope. The phase-1 AKY encoder rejects this. */
+  /** AY hardware envelope. The phase-1 AKY encoder rejects this; use YM6. */
   hardwareEnvelope: boolean;
-  /** Vectrex noise mixer on this channel. */
+  /** Vectrex noise mixer on this channel. AKY phase-1 does not encode noise; use YM6. */
   mixNoise: boolean;
+  /** AY noise period register R6 (0–31). */
+  noisePeriod: number;
+  /** AY hardware envelope period (R11–R12), 0–65535. */
+  hardwareEnvelopePeriod: number;
+  /** AY hardware envelope shape (R13), 0–15. */
+  hardwareEnvelopeShape: number;
+  /**
+   * Optional per-frame volume macro (0–15). Indexed by frames since note-on.
+   * Null or empty means unused. Soft envelopes and macros export via YM6;
+   * AKY carries the baked volume/period stream when noise/HW envelope are off.
+   */
+  volumeMacro: number[] | null;
+  /** Optional per-frame pitch offset in semitones. Null or empty means unused. */
+  pitchMacro: number[] | null;
+  /** Optional per-frame noise period macro (0–31). Null or empty means unused. */
+  noiseMacro: number[] | null;
   /**
    * Captured YM frames (16 register bytes each) for a snip instrument.
    * Playback uses the loudest tone in each frame on the channel that

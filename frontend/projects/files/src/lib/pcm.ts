@@ -23,6 +23,29 @@ function waveSample(wave: SidFrame['voices'][0]['wave'], phase: number, pulseWid
   return 0;
 }
 
+function ayHardwareEnvelopeLevel(shape: number, phase: number): number {
+  const continueBit = (shape & 0x08) !== 0;
+  const attack = (shape & 0x04) !== 0;
+  const alternate = (shape & 0x02) !== 0;
+  const hold = (shape & 0x01) !== 0;
+  if (!continueBit) {
+    const cycle = phase % 32;
+    if (attack) {
+      return cycle < 16 ? cycle / 15 : 0;
+    }
+    return cycle < 16 ? (15 - cycle) / 15 : 0;
+  }
+  if (hold && phase >= 16) {
+    const endHigh = alternate ? !attack : attack;
+    return endHigh ? 1 : 0;
+  }
+  if (alternate && Math.floor(phase / 16) % 2 === 1) {
+    return (15 - (phase % 16)) / 15;
+  }
+  const step = phase % 16;
+  return attack ? step / 15 : (15 - step) / 15;
+}
+
 /** Mix rendered frames down to 16-bit mono PCM. This path does not use Web Audio. */
 export function renderPcm(rendered: RenderedSong): Int16Array {
   const samplesPerFrame = Math.round(SAMPLE_RATE / rendered.frameRate);
@@ -31,21 +54,47 @@ export function renderPcm(rendered: RenderedSong): Int16Array {
   let noise = 1;
   let filterLp = 0;
   let filterBp = 0;
+  let envShape = 0x0e;
+  let envPeriod = 0x1000;
+  let envClock = 0;
   for (let index = 0; index < rendered.frames.length; index += 1) {
     const frame = rendered.frames[index];
     for (let sample = 0; sample < samplesPerFrame; sample += 1) {
       let mixed = 0;
       if (rendered.chip === 'vectrex') {
         const ay = frame as AyFrame;
+        const mixer = ay[7] ?? 0x3f;
+        const noisePeriod = (ay[6] & 0x1f) || 1;
+        if (ay[8] & 0x10 || ay[9] & 0x10 || ay[10] & 0x10) {
+          envPeriod = ((ay[12] & 0xff) << 8) | (ay[11] & 0xff) || envPeriod;
+          envShape = ay[13] & 0x0f;
+        }
+        const envStep = Math.floor(envClock / Math.max(1, Math.floor(envPeriod / 256) || 1));
+        // Advance AY-ish noise LFSR a few times per sample based on noise period.
+        const noiseTicks = Math.max(1, Math.round(8 / noisePeriod));
+        for (let tick = 0; tick < noiseTicks; tick += 1) {
+          noise = (noise >> 1) | (((noise ^ (noise >> 1)) & 1) << 14);
+        }
+        const noiseSample = noise & 1 ? 0.22 : -0.22;
         for (let channel = 0; channel < 3; channel += 1) {
           const period = (ay[channel * 2] | ((ay[channel * 2 + 1] & 0x0f) << 8)) || 1;
           const hz = 1_500_000 / (16 * period);
-          const enabled = (ay[7] & (1 << channel)) === 0;
-          const volume = (ay[8 + channel] & 0x10) ? 0.4 : (ay[8 + channel] & 0x0f) / 15;
-          if (enabled) {
-            mixed += square(phases[channel]) * volume;
+          const toneOn = (mixer & (1 << channel)) === 0;
+          const noiseOn = (mixer & (1 << (channel + 3))) === 0;
+          const volReg = ay[8 + channel] ?? 0;
+          const level = (volReg & 0x10)
+            ? ayHardwareEnvelopeLevel(envShape, envStep)
+            : (volReg & 0x0f) / 15;
+          if (toneOn) {
+            mixed += square(phases[channel]) * level;
             phases[channel] = (phases[channel] + hz / SAMPLE_RATE) % 1;
           }
+          if (noiseOn) {
+            mixed += noiseSample * level * 0.7;
+          }
+        }
+        if (sample === samplesPerFrame - 1) {
+          envClock += 1;
         }
       } else if (rendered.chip === 'c64') {
         const sid = frame as SidFrame;

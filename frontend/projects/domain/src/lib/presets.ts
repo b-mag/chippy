@@ -77,21 +77,30 @@ export const INSTRUMENT_PRESETS: InstrumentPreset[] = [
   // Vectrex free
   preset('vx-tone-lead', 'Soft lead', 'vectrex', 'tone', false, {
     envelopeStart: 12,
+    envelopeDown: true,
+    envelopePeriod: 2,
     hardwareEnvelope: false,
     mixNoise: false,
   }),
   preset('vx-tone-bass', 'Soft bass', 'vectrex', 'tone', false, {
     envelopeStart: 14,
+    envelopeDown: true,
+    envelopePeriod: 3,
     hardwareEnvelope: false,
     mixNoise: false,
   }),
   preset('vx-noise-snare', 'Noise hit', 'vectrex', 'tone', false, {
     envelopeStart: 12,
+    envelopeDown: true,
+    envelopePeriod: 1,
     mixNoise: true,
+    noisePeriod: 4,
     hardwareEnvelope: false,
   }),
   preset('vx-staccato', 'Staccato', 'vectrex', 'tone', false, {
     envelopeStart: 10,
+    envelopeDown: true,
+    envelopePeriod: 1,
     mixNoise: false,
     hardwareEnvelope: false,
   }),
@@ -99,12 +108,16 @@ export const INSTRUMENT_PRESETS: InstrumentPreset[] = [
   preset('vx-hard-env', 'Hard envelope', 'vectrex', 'tone', true, {
     envelopeStart: 15,
     hardwareEnvelope: true,
+    hardwareEnvelopePeriod: 0x1000,
+    hardwareEnvelopeShape: 0x0e,
     mixNoise: false,
   }),
   preset('vx-noise-wind', 'Noise wind', 'vectrex', 'tone', true, {
     envelopeStart: 8,
     mixNoise: true,
+    noisePeriod: 18,
     hardwareEnvelope: false,
+    volumeMacro: [8, 8, 7, 6, 5, 4, 3, 2, 1, 0],
   }),
   // C64 free
   preset('c64-pulse-lead', 'Pulse lead', 'c64', 'sid', false, {

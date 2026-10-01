@@ -180,17 +180,51 @@ function tickVoiceFx(voice: Voice): void {
   }
 }
 
+function macroAt(macro: number[] | null | undefined, age: number): number | null {
+  if (!macro || macro.length === 0) {
+    return null;
+  }
+  return macro[Math.min(age, macro.length - 1)] ?? null;
+}
+
+function aySoftVolume(instrument: Instrument | undefined, baseVolume: number, gateAge: number): number {
+  if (!instrument || instrument.hardwareEnvelope) {
+    return baseVolume;
+  }
+  const rate = instrument.envelopePeriod & 0x07;
+  if (rate <= 0) {
+    return baseVolume;
+  }
+  const steps = Math.floor(Math.max(0, gateAge - 1) / rate);
+  const delta = instrument.envelopeDown === false ? steps : -steps;
+  return Math.min(15, Math.max(0, baseVolume + delta));
+}
+
 function ayFrame(song: Song, voices: Voice[]): AyFrame {
   const frame = new Array<number>(16).fill(0);
   let mixer = 0x3f;
+  let noisePeriod = 0;
+  let noiseWritten = false;
+  let hwEnvPeriod = 0x1000;
+  let hwEnvShape = 0x0e;
+  let hwEnvUsed = false;
   for (let channel = 0; channel < 3; channel += 1) {
     const voice = voices[channel];
     if (!voice.active) {
       continue;
     }
     const instrument = instrumentOf(song, voice.instrumentId);
-    let period = voice.note === null ? 0 : ayPeriod(voice.note);
+    const age = Math.max(0, voice.gateAge - 1);
+    const pitchOffset = macroAt(instrument?.pitchMacro, age) ?? 0;
+    const midi = voice.note === null ? null : voice.note + pitchOffset;
+    let period = midi === null ? 0 : ayPeriod(Math.min(127, Math.max(0, Math.round(midi))));
     let volume = voice.volume ?? instrument?.envelopeStart ?? 12;
+    const volumeMacro = macroAt(instrument?.volumeMacro, age);
+    if (volumeMacro !== null) {
+      volume = volumeMacro & 0x0f;
+    } else {
+      volume = aySoftVolume(instrument, volume, voice.gateAge);
+    }
     if (instrument?.kind === 'snip' && instrument.frames && instrument.frames.length > 0) {
       const captured = instrument.frames[Math.min(voice.snipIndex, instrument.frames.length - 1)];
       const dominant = dominantTone(captured);
@@ -205,16 +239,26 @@ function ayFrame(song: Song, voices: Voice[]): AyFrame {
     mixer &= ~(1 << channel);
     if (instrument?.mixNoise) {
       mixer &= ~(1 << (channel + 3));
-      frame[6] = 8;
+      const noiseMacro = macroAt(instrument.noiseMacro, age);
+      noisePeriod = noiseMacro !== null ? noiseMacro & 0x1f : (instrument.noisePeriod ?? 8) & 0x1f;
+      noiseWritten = true;
     }
     if (instrument?.hardwareEnvelope) {
       frame[8 + channel] = 0x10 | (volume & 0x0f);
-      frame[11] = 0x00;
-      frame[12] = 0x10;
-      frame[13] = 0x0e;
+      hwEnvPeriod = (instrument.hardwareEnvelopePeriod ?? 0x1000) & 0xffff;
+      hwEnvShape = (instrument.hardwareEnvelopeShape ?? 0x0e) & 0x0f;
+      hwEnvUsed = true;
     } else {
       frame[8 + channel] = volume & 0x0f;
     }
+  }
+  if (noiseWritten) {
+    frame[6] = noisePeriod & 0x1f;
+  }
+  if (hwEnvUsed) {
+    frame[11] = hwEnvPeriod & 0xff;
+    frame[12] = (hwEnvPeriod >> 8) & 0xff;
+    frame[13] = hwEnvShape & 0x0f;
   }
   frame[7] = mixer;
   return frame;

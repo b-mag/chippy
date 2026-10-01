@@ -24,6 +24,16 @@ function reject(message: string): never {
   throw new Error(message);
 }
 
+function normalizeMacro(raw: unknown): number[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return null;
+  }
+  const steps = raw
+    .map((step) => (typeof step === 'number' && Number.isFinite(step) ? Math.round(step) : null))
+    .filter((step): step is number => step !== null);
+  return steps.length > 0 ? steps : null;
+}
+
 function normalizeInstrument(raw: unknown, index: number): Instrument {
   if (!isRecord(raw)) {
     return baseInstrument({ id: `ins-${index + 1}`, name: `Instrument ${index + 1}`, kind: 'pulse' });
@@ -36,6 +46,9 @@ function normalizeInstrument(raw: unknown, index: number): Instrument {
     id,
     name,
     kind,
+    volumeMacro: normalizeMacro(raw['volumeMacro']),
+    pitchMacro: normalizeMacro(raw['pitchMacro']),
+    noiseMacro: normalizeMacro(raw['noiseMacro']),
   });
 }
 

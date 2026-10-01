@@ -232,22 +232,58 @@
       <div class="studio-hardware">
         <h3>{{ chip().label }} · {{ kindLabel(armed().kind) }}</h3>
         @for (field of hardwareFields(); track field.key) {
-          <label>{{ field.label }}
-            @if (field.control === 'toggle') {
+          @if (field.control === 'toggle') {
+            <label class="field-row">{{ field.label }}
               <input type="checkbox" [checked]="fieldValue(field.key) === true" (change)="patchField(field.key, ($any($event.target)).checked ? 'true' : 'false', 'toggle')" />
-            } @else if (field.control === 'select') {
+            </label>
+          } @else if (field.control === 'select') {
+            <label class="field-row">{{ field.label }}
               <select [value]="fieldValue(field.key)" (change)="patchField(field.key, ($any($event.target)).value, 'select')">
                 @for (option of field.options; track option.label) {
                   <option [value]="option.value">{{ option.label }}</option>
                 }
               </select>
-            } @else {
+            </label>
+          } @else if (field.control === 'macro') {
+            <label class="field-macro">{{ field.label }}
+              <input
+                type="text"
+                [value]="macroText(field.key)"
+                placeholder="e.g. F E D C 0"
+                (change)="patchMacro(field.key, ($any($event.target)).value, field.min ?? 0, field.max ?? 15)" />
+            </label>
+          } @else if (field.control === 'knob') {
+            <div class="field-knob">
+              <span class="field-knob-label">{{ field.label }}</span>
+              <button
+                type="button"
+                class="knob"
+                [attr.aria-label]="field.label"
+                [attr.aria-valuemin]="field.min ?? 0"
+                [attr.aria-valuemax]="field.max ?? 15"
+                [attr.aria-valuenow]="numericField(field.key)"
+                [style.--knob-angle]="knobAngle(field.key, field.min ?? 0, field.max ?? 15) + 'deg'"
+                (pointerdown)="startKnobDrag($event, field.key, field.min ?? 0, field.max ?? 15)"></button>
+              <input
+                type="number"
+                class="knob-number"
+                [min]="field.min"
+                [max]="field.max"
+                [value]="numericField(field.key)"
+                (input)="patchField(field.key, ($any($event.target)).value, 'number', true)"
+                (change)="patchField(field.key, ($any($event.target)).value, 'number')" />
+            </div>
+          } @else {
+            <label class="field-row">{{ field.label }}
               <input type="number" [min]="field.min" [max]="field.max" [value]="fieldValue(field.key)" (change)="patchField(field.key, ($any($event.target)).value, 'number')" />
-            }
-          </label>
+            </label>
+          }
         }
         @if (hardwareFields().length === 0) {
           <p class="hardware-empty">No hardware controls for this type.</p>
+        }
+        @if (project().chip === 'vectrex' && armed().kind === 'tone') {
+          <p class="hardware-hint">Noise and hardware envelope need YM6 export; AKY is software tones only.</p>
         }
       </div>
     </div>

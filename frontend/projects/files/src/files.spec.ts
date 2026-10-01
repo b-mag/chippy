@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { enterNote, newProject, newSession, songForRender } from '@chippy/domain';
+import { enterNote, newProject, newSession, songForRender, updateInstrument } from '@chippy/domain';
 import { renderSong } from '@chippy/engines';
 import {
   a4Hz,
@@ -100,6 +100,15 @@ describe('export helpers', () => {
     expect(aky.configFile.filename).toContain('playerconfig');
     expect(() => exportVgm(song)).toThrow(/Game Boy/);
     expect(renderSong(song).chip).toBe('vectrex');
+  });
+
+  it('rejects aky when vectrex noise or hardware envelope is used', () => {
+    let state = newSession('vectrex');
+    state = updateInstrument(state, state.project.armedInstrumentId, { mixNoise: true });
+    state = enterNote(state, 69);
+    expect(() => exportAky(songForRender(state.project))).toThrow(/YM6/);
+    state = updateInstrument(state, state.project.armedInstrumentId, { mixNoise: false, hardwareEnvelope: true });
+    expect(() => exportAky(songForRender(state.project))).toThrow(/YM6/);
   });
 
   it('exports wav for c64 soft SID', () => {

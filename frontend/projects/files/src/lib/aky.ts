@@ -10,13 +10,22 @@ export class AkyUnsupportedError extends Error {
 /**
  * Phase-1 AKY subset for Malban's Vectrex player.
  * The 6809 is big-endian, but that player reads the song as little-endian
- * `dc.b` bytes. Only software-only tones are encoded. A hardware envelope
- * throws, because this subset does not emit hardware blocks.
+ * `dc.b` bytes. Encodes software-only tones (baked soft envelopes, volume
+ * macros, and pitch macros are fine — they are just period/volume streams).
+ * Hardware envelope and noise need YM6 export instead.
  */
 export function encodeAky(frames: AyFrame[], label = 'Main'): { song: string; playerconfig: string } {
   for (const frame of frames) {
     if ((frame[8] & 0x10) || (frame[9] & 0x10) || (frame[10] & 0x10)) {
-      throw new AkyUnsupportedError('Hardware envelope is not in the phase-1 AKY encoder. Turn it off and export again.');
+      throw new AkyUnsupportedError(
+        'Hardware envelope is not in the phase-1 AKY encoder. Turn it off, or export YM6 for full AY features.',
+      );
+    }
+    const mixer = frame[7] ?? 0x3f;
+    if ((mixer & 0x38) !== 0x38) {
+      throw new AkyUnsupportedError(
+        'Noise mix is not in the phase-1 AKY encoder. Turn Noise off, or export YM6 for full AY features.',
+      );
     }
   }
   const bytes: number[] = [];
