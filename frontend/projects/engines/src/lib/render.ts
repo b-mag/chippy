@@ -52,6 +52,10 @@ interface Voice {
   pendingVolume: number | null;
   delayFramesLeft: number;
   volumeSlide: number;
+  /** Frames left before cut at tick start (effect C). -1 = inactive; 0 = cut now. */
+  cutAfter: number;
+  /** Semitone delta applied each frame (effect P). */
+  pitchSlide: number;
   retriggerPeriod: number;
   retriggerAge: number;
   gateAge: number;
@@ -74,11 +78,31 @@ function silentVoices(count: number): Voice[] {
     pendingVolume: null,
     delayFramesLeft: 0,
     volumeSlide: 0,
+    cutAfter: -1,
+    pitchSlide: 0,
     retriggerPeriod: 0,
     retriggerAge: 0,
     gateAge: 0,
     gated: false,
   }));
+}
+
+function cutVoice(voice: Voice): void {
+  voice.active = false;
+  voice.note = null;
+  voice.pendingNote = null;
+  voice.delayFramesLeft = 0;
+  voice.cutAfter = -1;
+  voice.pitchSlide = 0;
+  voice.gated = false;
+  voice.gateAge = 0;
+}
+
+function soundingMidi(voice: Voice, macroOffset = 0): number | null {
+  if (voice.note === null) {
+    return null;
+  }
+  return Math.min(127, Math.max(0, Math.round(voice.note + macroOffset)));
 }
 
 function dominantTone(frame: number[]): { period: number; volume: number } {
@@ -96,14 +120,22 @@ function dominantTone(frame: number[]): { period: number; volume: number } {
 function applyEffect(voice: Voice, effect: CellEffect | null): void {
   voice.volumeSlide = 0;
   voice.retriggerPeriod = 0;
+  voice.cutAfter = -1;
+  voice.pitchSlide = 0;
   if (!effect) {
     return;
   }
   if (effect.cmd === 'A') {
     voice.volumeSlide = -(effect.value & 0x0f);
+  } else if (effect.cmd === 'U') {
+    voice.volumeSlide = effect.value & 0x0f;
   } else if (effect.cmd === 'R') {
     voice.retriggerPeriod = Math.max(1, effect.value & 0x0f);
     voice.retriggerAge = 0;
+  } else if (effect.cmd === 'C') {
+    voice.cutAfter = effect.value & 0x0f;
+  } else if (effect.cmd === 'P') {
+    voice.pitchSlide = (effect.value & 0x0f) - 8;
   }
 }
 
@@ -130,12 +162,7 @@ function applyRow(voices: Voice[], row: Cell[]): void {
     }
     applyEffect(voice, cell.effect ?? null);
     if (cell.cut) {
-      voice.active = false;
-      voice.note = null;
-      voice.pendingNote = null;
-      voice.delayFramesLeft = 0;
-      voice.gated = false;
-      voice.gateAge = 0;
+      cutVoice(voice);
       return;
     }
     if (cell.note !== null) {
@@ -162,10 +189,20 @@ function tickVoiceFx(voice: Voice): void {
       voice.pendingNote = null;
     }
   }
+  if (voice.cutAfter >= 0) {
+    if (voice.cutAfter === 0) {
+      cutVoice(voice);
+      return;
+    }
+    voice.cutAfter -= 1;
+  }
   if (voice.volumeSlide !== 0 && voice.volume !== null) {
     voice.volume = Math.min(15, Math.max(0, voice.volume + voice.volumeSlide));
   } else if (voice.volumeSlide !== 0 && voice.volume === null && voice.active) {
     voice.volume = Math.min(15, Math.max(0, 12 + voice.volumeSlide));
+  }
+  if (voice.pitchSlide !== 0 && voice.note !== null && voice.active) {
+    voice.note = Math.min(127, Math.max(0, voice.note + voice.pitchSlide));
   }
   if (voice.retriggerPeriod > 0 && voice.active && voice.note !== null) {
     voice.retriggerAge += 1;
@@ -216,8 +253,8 @@ function ayFrame(song: Song, voices: Voice[]): AyFrame {
     const instrument = instrumentOf(song, voice.instrumentId);
     const age = Math.max(0, voice.gateAge - 1);
     const pitchOffset = macroAt(instrument?.pitchMacro, age) ?? 0;
-    const midi = voice.note === null ? null : voice.note + pitchOffset;
-    let period = midi === null ? 0 : ayPeriod(Math.min(127, Math.max(0, Math.round(midi))));
+    const midi = soundingMidi(voice, pitchOffset);
+    let period = midi === null ? 0 : ayPeriod(midi);
     let volume = voice.volume ?? instrument?.envelopeStart ?? 12;
     const volumeMacro = macroAt(instrument?.volumeMacro, age);
     if (volumeMacro !== null) {
@@ -285,7 +322,11 @@ function gbFrame(song: Song, voices: Voice[]): GbFrame {
       return;
     }
     const instrument = instrumentOf(song, voice.instrumentId);
-    const frequency = gbFrequency(voice.note);
+    const midi = soundingMidi(voice);
+    if (midi === null) {
+      return;
+    }
+    const frequency = gbFrequency(midi);
     const duty = (instrument?.duty ?? 2) & 0x03;
     if (prefix === 'nr1') {
       const sweepTime = instrument?.sweepTime ?? 0;
@@ -307,17 +348,21 @@ function gbFrame(song: Song, voices: Voice[]): GbFrame {
   const wave = voices[2];
   if (wave.active && wave.note !== null) {
     const instrument = instrumentOf(song, wave.instrumentId);
-    const frequency = gbFrequency(wave.note);
-    frame.nr30 = 0x80;
-    frame.nr32 = 0x20;
-    frame.nr33 = frequency & 0xff;
-    frame.nr34 = ((frequency >> 8) & 0x07) | 0x80;
-    frame.wave = WAVEFORMS[(instrument?.waveform ?? 0) % WAVEFORMS.length];
+    const midi = soundingMidi(wave);
+    if (midi !== null) {
+      const frequency = gbFrequency(midi);
+      frame.nr30 = 0x80;
+      frame.nr32 = 0x20;
+      frame.nr33 = frequency & 0xff;
+      frame.nr34 = ((frequency >> 8) & 0x07) | 0x80;
+      frame.wave = WAVEFORMS[(instrument?.waveform ?? 0) % WAVEFORMS.length];
+    }
   }
   const noise = voices[3];
   if (noise.active) {
     const instrument = instrumentOf(song, noise.instrumentId);
-    const shift = noise.note === null ? 8 : Math.min(15, Math.max(0, 80 - noise.note));
+    const midi = soundingMidi(noise);
+    const shift = midi === null ? 8 : Math.min(15, Math.max(0, 80 - midi));
     frame.nr42 = envelopeByte(instrument, noise.volume);
     frame.nr43 = (shift << 4) | (instrument?.noiseShort ? 0x08 : 0) | 0x02;
     frame.nr44 = 0x80;
@@ -328,7 +373,7 @@ function gbFrame(song: Song, voices: Voice[]): GbFrame {
 function sidParamsFromVoice(song: Song, voice: Voice): SoftSidVoiceParams {
   const instrument = instrumentOf(song, voice.instrumentId);
   return {
-    midi: voice.note,
+    midi: soundingMidi(voice),
     active: voice.active,
     attack: instrument?.attack ?? 2,
     decay: instrument?.decay ?? 4,

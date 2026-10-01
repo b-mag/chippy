@@ -40,6 +40,13 @@ describe('project file', () => {
     });
     parsedFx.songs[0].patterns[0].rows[0][0].effect = { cmd: 'Z', value: 1 };
     expect(parseProject(JSON.stringify(parsedFx)).songs[0].patterns[0].rows[0][0].effect).toBeNull();
+    for (const cmd of ['U', 'C', 'P'] as const) {
+      parsedFx.songs[0].patterns[0].rows[0][0].effect = { cmd, value: 3 };
+      expect(parseProject(JSON.stringify(parsedFx)).songs[0].patterns[0].rows[0][0].effect).toEqual({
+        cmd,
+        value: 3,
+      });
+    }
     expect(downloadName({ ...project, name: 'My Song!' }, 'json')).toBe('My-Song.json');
     expect(downloadName({ ...project, name: '!!!' }, 'json')).toBe('chippy.json');
     const legacy = {

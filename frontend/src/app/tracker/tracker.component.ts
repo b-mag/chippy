@@ -247,7 +247,7 @@ export class TrackerComponent {
     if (column === 'volume') {
       return 'Volume — hex 0–F; .. = use instrument level';
     }
-    return 'FX — A volume slide, D delay, R retrigger (letter then hex value)';
+    return 'FX — A vol down, U vol up, D delay, R retrigger, C cut, P pitch (letter then hex value)';
   }
 
   private syncArmedFromCursor(): void {
@@ -708,7 +708,7 @@ export class TrackerComponent {
     const pattern = this.pattern();
     const cursor = this.state().cursor;
     const existing = pattern.rows[cursor.row][cursor.channel]?.effect ?? null;
-    if (upper === 'A' || upper === 'D' || upper === 'R') {
+    if (upper === 'A' || upper === 'U' || upper === 'D' || upper === 'R' || upper === 'C' || upper === 'P') {
       this.session.effect({ cmd: upper as EffectCmd, value: existing?.value ?? 0 });
       return;
     }

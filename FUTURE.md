@@ -43,5 +43,9 @@ Replace auth stubs so donors get ad-free sessions and premium presets without `p
 
 ## Tracker consistency wins (ahead of Chains)
 
-- Richer shared FX command set per chip
-- Radio polish: HTTPS stream mirrors, now-playing metadata, CORS-friendly visualization
+Shipped: richer shared FX (`U` / `C` / `P`), Radio reconnect, CORS-gated viz, Rainwave now-playing.
+
+Still open:
+
+- More chip-specific FX beyond the shared column
+- Additional station HTTPS mirrors / now-playing APIs beyond Rainwave

@@ -15,10 +15,13 @@ export type ColumnId = 'note' | 'instrument' | 'volume' | 'effect';
  * Shared FX commands (common-denominator tracker column).
  * Engines that do not implement a command ignore it.
  * - A: volume slide down by `value` each frame (0-15)
+ * - U: volume slide up by `value` each frame (0-15)
  * - D: delay note onset by `value` frames into the row (0-15)
  * - R: retrigger / re-gate every `value` frames (1-15)
+ * - C: cut note after `value` frames (0 = cut on the first tick)
+ * - P: pitch slide; each frame nudge MIDI by `((value & 0x0f) - 8)` (8 = hold)
  */
-export type EffectCmd = 'A' | 'D' | 'R';
+export type EffectCmd = 'A' | 'U' | 'D' | 'R' | 'C' | 'P';
 
 export interface CellEffect {
   cmd: EffectCmd;
@@ -164,7 +167,7 @@ export interface Cursor {
   column: ColumnId;
 }
 
-export const EFFECT_CMDS: EffectCmd[] = ['A', 'D', 'R'];
+export const EFFECT_CMDS: EffectCmd[] = ['A', 'U', 'D', 'R', 'C', 'P'];
 
 export function formatEffect(effect: CellEffect | null): string {
   if (!effect) {

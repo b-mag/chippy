@@ -14,7 +14,7 @@ import {
 } from '@chippy/domain';
 
 const CHIP_IDS: ChipId[] = ['gameboy', 'vectrex', 'c64'];
-const EFFECT_CMDS = new Set<EffectCmd>(['A', 'D', 'R']);
+const EFFECT_CMDS = new Set<EffectCmd>(['A', 'U', 'D', 'R', 'C', 'P']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

@@ -187,6 +187,67 @@ describe('renderSong', () => {
     expect(slid.chip).toBe('c64');
   });
 
+  it('honors volume-up, timed cut, and pitch-slide FX', () => {
+    let up = enterNote(newSession('vectrex'), 60);
+    const upSong = songForRender(up.project);
+    upSong.patterns[0].rows[0][0] = {
+      ...upSong.patterns[0].rows[0][0],
+      volume: 4,
+      effect: { cmd: 'U', value: 2 },
+    };
+    const upRendered = renderSong(upSong);
+    expect(upRendered.chip).toBe('vectrex');
+    if (upRendered.chip === 'vectrex') {
+      expect(upRendered.frames[0][8] & 0x0f).toBeLessThan(upRendered.frames[2][8] & 0x0f);
+    }
+
+    let nullVol = enterNote(newSession('c64'), 60);
+    const nullVolSong = songForRender(nullVol.project);
+    nullVolSong.patterns[0].rows[0][0] = {
+      ...nullVolSong.patterns[0].rows[0][0],
+      volume: null,
+      effect: { cmd: 'U', value: 1 },
+    };
+    expect(renderSong(nullVolSong).chip).toBe('c64');
+
+    let cut = enterNote(newSession('gameboy'), 60);
+    const cutSong = songForRender(cut.project);
+    cutSong.patterns[0].rows[0][0] = {
+      ...cutSong.patterns[0].rows[0][0],
+      effect: { cmd: 'C', value: 1 },
+    };
+    const cutRendered = renderSong(cutSong);
+    expect(cutRendered.chip).toBe('gameboy');
+    if (cutRendered.chip === 'gameboy') {
+      expect(cutRendered.frames[0].nr14 & 0x80).toBe(0x80);
+      expect(cutRendered.frames[1].nr14 & 0x80).toBe(0);
+    }
+
+    let cutNow = enterNote(newSession('gameboy'), 60);
+    const cutNowSong = songForRender(cutNow.project);
+    cutNowSong.patterns[0].rows[0][0] = {
+      ...cutNowSong.patterns[0].rows[0][0],
+      effect: { cmd: 'C', value: 0 },
+    };
+    const cutNowRendered = renderSong(cutNowSong);
+    expect(cutNowRendered.chip).toBe('gameboy');
+    if (cutNowRendered.chip === 'gameboy') {
+      expect(cutNowRendered.frames[0].nr14 & 0x80).toBe(0);
+    }
+
+    let pitch = enterNote(newSession('c64'), 60);
+    const pitchSong = songForRender(pitch.project);
+    pitchSong.patterns[0].rows[0][0] = {
+      ...pitchSong.patterns[0].rows[0][0],
+      effect: { cmd: 'P', value: 10 },
+    };
+    const pitchRendered = renderSong(pitchSong);
+    expect(pitchRendered.chip).toBe('c64');
+    if (pitchRendered.chip === 'c64') {
+      expect(pitchRendered.frames[2].voices[0].hz).toBeGreaterThan(pitchRendered.frames[0].voices[0].hz);
+    }
+  });
+
   it('covers SID wave picks, release, filter, and retrigger FX', () => {
     let saw = newSession('c64');
     saw = updateInstrument(saw, saw.project.armedInstrumentId, {
