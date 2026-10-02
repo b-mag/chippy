@@ -168,7 +168,7 @@ describe('session editing', () => {
     expect(state.lsdjSavBase).toBeNull();
     const sav = new Uint8Array(8);
     sav[0] = 1;
-    const map = { channelPhrases: [[], [], [], []], editableInstruments: [0] };
+    const map = { editableInstruments: [0], allocatedTables: [0] };
     state = setLsdjOverlay(state, sav, map);
     expect(state.lsdjSavBase?.[0]).toBe(1);
     expect(state.lsdjImportMap?.editableInstruments).toEqual([0]);

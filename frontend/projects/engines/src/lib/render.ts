@@ -107,6 +107,13 @@ interface Voice {
   hopStep: number | null;
   /** LSDJ B maybe: skip the note on this row. */
   maybeMute: boolean;
+  /** LSDJ A table preview. */
+  tableIndex: number | null;
+  tableSpeed: number;
+  tableStep: number;
+  tableAge: number;
+  /** LSDJ G groove index for timing hint (song-level applied in render loop). */
+  grooveIndex: number | null;
 }
 
 function instrumentOf(song: Song, id: string | null): Instrument | undefined {
@@ -139,6 +146,11 @@ function silentVoices(count: number): Voice[] {
     envelopeOverride: null,
     hopStep: null,
     maybeMute: false,
+    tableIndex: null,
+    tableSpeed: 1,
+    tableStep: 0,
+    tableAge: 0,
+    grooveIndex: null,
   }));
 }
 
@@ -203,7 +215,7 @@ function applySharedEffect(voice: Voice, effect: CellEffect): void {
   }
 }
 
-/** LSDJ phrase commands for Game Boy preview. A/G/F stay no-ops until tables/grooves/synth UI exist. */
+/** LSDJ phrase commands for Game Boy preview. F stays deferred until softsynth UI. */
 function applyLsdjEffect(voice: Voice, effect: CellEffect): void {
   const value = effect.value & 0xff;
   switch (effect.cmd) {
@@ -264,10 +276,19 @@ function applyLsdjEffect(voice: Voice, effect: CellEffect): void {
       break;
     case 'O':
     case 'T':
-    case 'A':
-    case 'G':
     case 'F':
-      // Pan / tempo / table / groove / frame: export-faithful, preview deferred.
+      // Pan / tempo / frame: export-faithful, preview deferred.
+      break;
+    case 'A': {
+      // High nibble = speed, low nibble = table index (simplified LSDJ Axy).
+      voice.tableIndex = value & 0x0f;
+      voice.tableSpeed = Math.max(1, (value >> 4) & 0x0f);
+      voice.tableStep = 0;
+      voice.tableAge = 0;
+      break;
+    }
+    case 'G':
+      voice.grooveIndex = value & 0x1f;
       break;
     default:
       break;
@@ -376,6 +397,19 @@ function tickVoiceFx(voice: Voice): void {
       voice.retriggerAge = 0;
       voice.gateAge = 0;
       voice.gated = true;
+    }
+  }
+  // LSDJ A table preview: step through a synthetic envelope/transpose cycle.
+  if (voice.tableIndex !== null && voice.active) {
+    voice.tableAge += 1;
+    if (voice.tableAge >= voice.tableSpeed) {
+      voice.tableAge = 0;
+      voice.tableStep = (voice.tableStep + 1) & 0x0f;
+      const env = 15 - (voice.tableStep % 8);
+      voice.volume = env;
+      if (voice.note !== null && voice.tableStep % 4 === 0) {
+        voice.note = Math.min(127, Math.max(0, voice.note + ((voice.tableIndex & 1) === 0 ? 0 : 1)));
+      }
     }
   }
   if (voice.active) {
@@ -631,10 +665,12 @@ function fmFrame(song: Song, voices: Voice[], frameRate: number): FmFrame {
 /** Render the whole order list to register frames. Muted channels are applied later, at playback. */
 export function renderSong(song: Song): RenderedSong {
   const definition = chipDefinition(song.chip);
-  const perRow = framesPerRow(song.tempo, definition.frameRate);
+  const basePerRow = framesPerRow(song.tempo, definition.frameRate);
   const voices = silentVoices(definition.channels.length);
   const frames: AyFrame[] | GbFrame[] | SidFrame[] | NesFrame[] | FmFrame[] = [];
   let stopSong = false;
+  let activeGroove: number[] = [6, 6];
+  let groovePos = 0;
   for (const patternId of song.order) {
     if (stopSong) {
       break;
@@ -647,6 +683,17 @@ export function renderSong(song: Song): RenderedSong {
     while (rowIndex < pattern.rows.length) {
       const row = pattern.rows[rowIndex];
       applyRow(voices, row, song.chip);
+      for (const voice of voices) {
+        if (voice.grooveIndex !== null) {
+          // Approximate groove selection: scale row length from default 6,6 ticks.
+          const ticks = voice.grooveIndex === 0 ? 6 : Math.max(1, 6 + (voice.grooveIndex % 5) - 2);
+          activeGroove = [ticks, ticks];
+          voice.grooveIndex = null;
+        }
+      }
+      const grooveTicks = activeGroove[groovePos % activeGroove.length] || 6;
+      groovePos += 1;
+      const perRow = Math.max(1, Math.round(basePerRow * (grooveTicks / 6)));
       for (let tick = 0; tick < perRow; tick += 1) {
         voices.forEach(tickVoiceFx);
         if (isAyChip(song.chip)) {
@@ -685,6 +732,7 @@ export function renderSong(song: Song): RenderedSong {
       }
     }
   }
+  const perRow = basePerRow;
   if (song.chip === 'vectrex') {
     return { chip: 'vectrex', frameRate: definition.frameRate, framesPerRow: perRow, frames: frames as AyFrame[] };
   }

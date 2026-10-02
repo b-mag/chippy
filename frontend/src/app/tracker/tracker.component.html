@@ -58,53 +58,251 @@
     </div>
   </header>
 
-  <aside class="order">
-    <h2 title="Playlist of patterns. Click a slot to edit that pattern in the Pattern grid.">Song Order</h2>
-    <ol class="order-list"
-      (dragover)="onOrderDragOver($event)"
-      (drop)="onOrderDrop($event)">
-      @for (entry of orderEntries(); track entry.slotKey; let index = $index) {
-        <li
-          class="order-slot"
-          [class.drop-before]="dropIndex() === index"
-          [attr.data-index]="index"
-          draggable="true"
-          (dragstart)="onOrderDragStart($event, index)"
-          (dragend)="onOrderDragEnd()">
-          @if (renamingId() === entry.id) {
+  <section class="chip-panel" [attr.aria-label]="chip().label + ' panel'">
+    @if (isGameBoy()) {
+      <button
+        type="button"
+        class="btn-lsdj-mode"
+        [attr.aria-pressed]="lsdjMode()"
+        [title]="lsdjModeBlocked()
+          ?? (lsdjMode()
+            ? 'LSDJ Mode on — Song, Chain, and Phrase screens'
+            : 'LSDJ Mode — Song, Chain, and Phrase screens like LSDJ')"
+        (click)="toggleLsdjMode()">
+        LSDJ Mode
+      </button>
+      @if (lsdjMode()) {
+        <label class="groove-label" title="Active groove (tick lengths)">Groove
+          <input
+            type="number"
+            min="0"
+            max="30"
+            [value]="hierarchy()?.activeGroove ?? 0"
+            (change)="setActiveGroove(($any($event.target)).value)" />
+        </label>
+        <span class="groove-steps" title="Groove step ticks (0 ends)">
+          @for (step of grooveSteps().slice(0, 8); track $index) {
             <input
-              class="order-rename"
-              [value]="renameDraft()"
-              (input)="renameDraft.set(($any($event.target)).value)"
-              (keydown)="onRenameKey($event, entry.id)"
-              (blur)="commitRename(entry.id)"
-              #renameInput />
-          } @else {
-            <button
-              type="button"
-              class="order-item"
-              [attr.aria-current]="index === state().cursor.orderIndex ? 'true' : null"
-              (click)="session.selectOrder(index)"
-              (dblclick)="beginRename(entry.id, entry.name)">
-              <span class="order-index">{{ entry.indexLabel }}</span>
-              <span class="order-name">{{ entry.name }}</span>
-            </button>
+              class="groove-step"
+              type="number"
+              min="0"
+              max="15"
+              [value]="step"
+              (change)="setGrooveStep($index, ($any($event.target)).value)" />
           }
-        </li>
+        </span>
       }
-      @if (dropIndex() === orderEntries().length) {
-        <li class="order-slot drop-before drop-end" aria-hidden="true"></li>
+    }
+  </section>
+
+  <aside class="order">
+    @if (lsdjMode()) {
+      <h2 title="LSDJ Song screen: one chain number per channel, per row.">Song</h2>
+      <div class="song-screen" role="grid" aria-label="LSDJ song screen">
+        <div class="song-screen-head" role="row">
+          <span></span>
+          @for (label of songChannelLabels; track label) {
+            <span role="columnheader">{{ label }}</span>
+          }
+        </div>
+        @for (row of songScreenRows(); track row.row) {
+          <div class="song-screen-row" role="row" [class.playhead]="row.playing">
+            <span class="row-num">{{ row.label }}</span>
+            @for (cell of row.cells; track cell.channel) {
+              <input
+                class="song-cell"
+                role="gridcell"
+                maxlength="2"
+                [id]="songCellId(row.row, cell.channel)"
+                [class.cursor]="cell.selected"
+                [class.song-cell-empty]="cell.chain === null"
+                [value]="cell.text"
+                [attr.aria-selected]="cell.selected"
+                [title]="cell.chain === null
+                  ? 'Empty — click to start a new chain here, or type a chain number'
+                  : 'Chain ' + cell.text"
+                (keydown)="onSongKey($event, row.row, cell.channel)"
+                (focus)="selectSongCell(cell.channel, row.row)"
+                (click)="createChainAt(cell.channel, row.row, cell.chain)"
+                (change)="writeSongCell(cell.channel, row.row, ($any($event.target)).value)" />
+            }
+          </div>
+        }
+      </div>
+      <p class="lsdj-hint">
+        Arrow keys move between cells. Type a chain number (00–7F), or click an empty cell to
+        start a new chain.
+      </p>
+    } @else {
+      <h2 title="Playlist of patterns. Click a slot to edit that pattern in the Pattern grid.">Song Order</h2>
+      @if (hierarchy()) {
+        <div class="lsdj-badge">Flat view · edits the shared LSDJ phrases</div>
       }
-    </ol>
-    <div class="order-actions">
-      <button type="button" (click)="session.addPattern()">Add blank pattern</button>
-      <button type="button" (click)="session.addRandomPattern()">Add new pattern with random notes</button>
-      <button type="button" (click)="session.duplicatePattern()">Copy/Paste Pattern</button>
-      <button type="button" (click)="session.clearPattern()">Clear Pattern</button>
-      <button type="button" [disabled]="songBody().order.length <= 1" (click)="session.removePattern()">Remove pattern</button>
-    </div>
+      <ol class="order-list"
+        (dragover)="onOrderDragOver($event)"
+        (drop)="onOrderDrop($event)">
+        @for (entry of orderEntries(); track entry.slotKey; let index = $index) {
+          <li
+            class="order-slot"
+            [class.drop-before]="dropIndex() === index"
+            [attr.data-index]="index"
+            draggable="true"
+            (dragstart)="onOrderDragStart($event, index)"
+            (dragend)="onOrderDragEnd()">
+            @if (renamingId() === entry.id) {
+              <input
+                class="order-rename"
+                [value]="renameDraft()"
+                (input)="renameDraft.set(($any($event.target)).value)"
+                (keydown)="onRenameKey($event, entry.id)"
+                (blur)="commitRename(entry.id)"
+                #renameInput />
+            } @else {
+              <button
+                type="button"
+                class="order-item"
+                [attr.aria-current]="index === state().cursor.orderIndex ? 'true' : null"
+                (click)="session.selectOrder(index)"
+                (dblclick)="beginRename(entry.id, entry.name)">
+                <span class="order-index">{{ entry.indexLabel }}</span>
+                <span class="order-name">{{ entry.name }}</span>
+                @if (entry.shared) {
+                  <span class="order-shared" title="Shared phrase — edits update every use">
+                    shared · {{ entry.phraseLabel }}
+                  </span>
+                }
+              </button>
+            }
+          </li>
+        }
+        @if (dropIndex() === orderEntries().length) {
+          <li class="order-slot drop-before drop-end" aria-hidden="true"></li>
+        }
+      </ol>
+      <div class="order-actions">
+        <button type="button" (click)="session.addPattern()">Add blank pattern</button>
+        <button type="button" (click)="session.addRandomPattern()">Add new pattern with random notes</button>
+        <button type="button" (click)="session.duplicatePattern()">Copy/Paste Pattern</button>
+        <button type="button" (click)="session.clearPattern()">Clear Pattern</button>
+        <button type="button" [disabled]="songBody().order.length <= 1" (click)="session.removePattern()">Remove pattern</button>
+      </div>
+    }
   </aside>
 
+  @if (lsdjMode()) {
+  <section class="lsdj-screens" (focusin)="studioFocused.set(false)">
+    <div class="chain-screen" role="grid" aria-label="LSDJ chain screen">
+      <h2 class="grid-title" title="Chain: 16 steps of phrase number plus transpose.">
+        Chain {{ focusChainIndex() === null ? '--' : lsdjHex(focusChainIndex()!) }}
+      </h2>
+      <div class="chain-screen-head" role="row">
+        <span></span>
+        <span role="columnheader" title="Phrase number played at this step">PHR</span>
+        <span role="columnheader" title="Semitone transpose applied while this phrase runs">TSP</span>
+      </div>
+      @if (focusChain()) {
+        @for (step of chainScreenRows(); track step.step) {
+          <div class="chain-screen-row" role="row" [class.playhead]="step.playing">
+            <span class="row-num">{{ step.label }}</span>
+            <input
+              class="chain-cell"
+              role="gridcell"
+              maxlength="2"
+              [id]="chainCellId(step.step, 0)"
+              [class.cursor]="step.selected"
+              [class.song-cell-empty]="step.phrase === null"
+              [value]="step.phraseText"
+              [attr.aria-selected]="step.selected"
+              [title]="step.phrase === null
+                ? 'Empty — click to start a new phrase here, or type a phrase number'
+                : 'Phrase ' + step.phraseText"
+              (keydown)="onChainKey($event, step.step, 0)"
+              (focus)="selectChainStep(step.step)"
+              (click)="createPhraseAt(step.step, step.phrase)"
+              (change)="writeChainPhrase(step.step, ($any($event.target)).value)" />
+            <input
+              class="chain-cell chain-cell-transpose"
+              role="gridcell"
+              maxlength="2"
+              title="Transpose, signed hex (00 = none, FF = -1)"
+              [id]="chainCellId(step.step, 1)"
+              [value]="step.transposeText"
+              (keydown)="onChainKey($event, step.step, 1)"
+              (focus)="selectChainStep(step.step)"
+              (change)="writeChainTranspose(step.step, ($any($event.target)).value)" />
+          </div>
+        }
+      } @else {
+        <p class="lsdj-hint">Pick a chain on the Song screen.</p>
+      }
+    </div>
+
+    <div class="phrase-screen" role="grid" aria-label="LSDJ phrase screen">
+      <div class="grid-title-row">
+        <h2 class="grid-title" title="Phrase: 16 steps of Note, Instrument, Volume, FX on one channel.">
+          Phrase {{ focusPhraseIndex() === null ? '--' : lsdjHex(focusPhraseIndex()!) }}
+          <span class="phrase-channel">{{ songChannelLabels[songChannel()] }}</span>
+        </h2>
+        <button
+          type="button"
+          class="btn-fx-ref"
+          [attr.aria-expanded]="fxReferenceOpen()"
+          title="LSDJ phrase FX reference (?)"
+          (click)="toggleFxReference()">
+          FX
+        </button>
+      </div>
+      @if (fxReferenceOpen()) {
+        <div class="fx-reference" role="region" aria-label="LSDJ FX reference">
+          <div class="fx-reference-head">
+            <span>LSDJ phrase FX</span>
+            <button type="button" class="btn-fx-ref-close" (click)="closeFxReference()" title="Close">Close</button>
+          </div>
+          <ul class="fx-reference-list">
+            @for (entry of fxReference(); track entry.cmd) {
+              <li>
+                <span class="fx-ref-cmd">{{ entry.cmd }}</span>
+                <span class="fx-ref-name">{{ entry.name }}</span>
+                <span class="fx-ref-summary">{{ entry.summary }}</span>
+                @if (entry.previewNote) {
+                  <span class="fx-ref-preview">{{ entry.previewNote }}</span>
+                }
+              </li>
+            }
+          </ul>
+        </div>
+      }
+      <div class="phrase-screen-head" role="row">
+        <span></span>
+        <span role="columnheader" title="Note: piano keys write a pitch. ` or ~ = note cut (OFF).">NOTE</span>
+        <span role="columnheader" title="Instrument: type 1–9 (or the panel number) to assign that instrument. 0 clears.">INS</span>
+        <span role="columnheader" title="Volume: hex 0–F. Empty (..) keeps the instrument’s own level. Exports as an E command.">VOL</span>
+        <span role="columnheader" [title]="effectColumnTitle()">CMD</span>
+      </div>
+      @if (focusPhrase()) {
+        @for (step of phraseScreenRows(); track step.step) {
+          <div class="phrase-screen-row" role="row" [class.playhead]="step.playing">
+            <span class="row-num">{{ step.label }}</span>
+            @for (cell of step.cells; track cell.column) {
+              <button
+                type="button"
+                role="gridcell"
+                class="cell"
+                [class.cursor]="cell.selected"
+                [attr.aria-selected]="cell.selected"
+                [attr.title]="columnTooltip(cell.column)"
+                (click)="selectPhraseCell(step.step, cell.column)">
+                {{ cell.text }}
+              </button>
+            }
+          </div>
+        }
+      } @else {
+        <p class="lsdj-hint">Pick a phrase on the Chain screen.</p>
+      }
+    </div>
+  </section>
+  } @else {
   <section
     class="grid"
     role="grid"
@@ -198,6 +396,7 @@
       </div>
     }
   </section>
+  }
 
   <aside class="instrument" (focusin)="studioFocused.set(true)" (mousedown)="studioFocused.set(true)">
     <h2 title="Armed instrument is used when you write notes. Numbers match the Instrument (I) column in the Pattern grid.">Instrument</h2>
@@ -389,6 +588,38 @@
               <p class="hardware-hint">
                 TL 0 is loudest. Carriers set the level you hear; modulators set the timbre.
               </p>
+            </div>
+          }
+
+          @if (lsdjMode() && isGameBoy()) {
+            <div class="lsdj-tables">
+              <h3>Tables</h3>
+              <p class="hardware-hint">Phrase command A runs a table. Edit steps here.</p>
+              <button type="button" (click)="addTable()">Add table</button>
+              @for (table of activeTables(); track table.index) {
+                <div class="lsdj-table">
+                  <h4>Table {{ lsdjHex(table.index) }}</h4>
+                  <div class="lsdj-table-grid">
+                    @for (step of table.steps; track $index; let index = $index) {
+                      <div class="lsdj-table-row">
+                        <span>{{ index.toString(16).toUpperCase() }}</span>
+                        <input type="number" min="0" max="255" title="Envelope"
+                          [value]="step.envelope"
+                          (change)="updateTableStep(table, index, 'envelope', ($any($event.target)).value)" />
+                        <input type="number" min="0" max="255" title="Transpose"
+                          [value]="step.transpose"
+                          (change)="updateTableStep(table, index, 'transpose', ($any($event.target)).value)" />
+                        <input type="number" min="0" max="255" title="Cmd1 value"
+                          [value]="step.cmd1Value"
+                          (change)="updateTableStep(table, index, 'cmd1Value', ($any($event.target)).value)" />
+                        <input type="number" min="0" max="255" title="Cmd2 value"
+                          [value]="step.cmd2Value"
+                          (change)="updateTableStep(table, index, 'cmd2Value', ($any($event.target)).value)" />
+                      </div>
+                    }
+                  </div>
+                </div>
+              }
             </div>
           }
         </div>

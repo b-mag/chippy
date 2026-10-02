@@ -24,14 +24,14 @@ const SHARED_EFFECT_HELP: Record<SharedEffectCmd, EffectHelp> = {
   P: { cmd: 'P', name: 'Pitch', summary: 'Pitch slide; low nibble 8 holds, else nudge MIDI each frame.' },
 };
 
-const LSDJ_PREVIEW_DEFERRED = 'Exports to .sav; live preview is approximate or silent until tables/grooves/synth land.';
+const LSDJ_PREVIEW_DEFERRED = 'Exports to .sav; live preview is approximate until softsynth lands.';
 
 const LSDJ_EFFECT_HELP: Record<LsdjEffectCmd, EffectHelp> = {
   A: {
     cmd: 'A',
     name: 'Table',
     summary: 'Run instrument table (high/low nibbles select speed and table).',
-    previewNote: LSDJ_PREVIEW_DEFERRED,
+    previewNote: 'Preview applies table envelope / transpose when tables exist in LSDJ mode.',
   },
   B: { cmd: 'B', name: 'Vibrato', summary: 'Probabilistic mute / buzz from value (0–FF).' },
   C: { cmd: 'C', name: 'Chord', summary: 'Arp chord: high and low nibbles are semitone offsets.' },
@@ -47,7 +47,7 @@ const LSDJ_EFFECT_HELP: Record<LsdjEffectCmd, EffectHelp> = {
     cmd: 'G',
     name: 'Groove',
     summary: 'Select groove for swing / tick timing.',
-    previewNote: LSDJ_PREVIEW_DEFERRED,
+    previewNote: 'Preview uses the selected groove’s tick lengths when LSDJ mode grooves are present.',
   },
   H: { cmd: 'H', name: 'Hop', summary: 'Jump in the phrase (0–F step, FF = stop, or hop-back form).' },
   K: { cmd: 'K', name: 'Kill', summary: 'Kill / cut after low-nibble ticks.' },

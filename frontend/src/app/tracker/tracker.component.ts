@@ -13,11 +13,27 @@ import { RouterLink } from '@angular/router';
 import {
   activeSongBody,
   armedInstrument,
+  chainAt,
+  channelFlatSlots,
   channelIsPlaceholder,
   chipDefinition,
   chipIds,
   chipLabel,
+  derivedOrderEntries,
+  findChain,
   findInstrumentIdByNumberLabel,
+  findPhrase,
+  focusedChainIndex,
+  focusedPhraseIndex,
+  lsdjHex,
+  parseLsdjHex,
+  signedTransposeByte,
+  songRowCount,
+  LSDJ_CHANNELS,
+  LSDJ_CHANNEL_LABELS,
+  LSDJ_MAX_CHAINS,
+  LSDJ_MAX_PHRASES,
+  LSDJ_PHRASE_LENGTH,
   fmAlgorithmRouting,
   fmFieldValue,
   effectCmdsForChip,
@@ -48,6 +64,7 @@ import {
   type Instrument,
   type InstrumentKind,
   type InstrumentPreset,
+  type LsdjTable,
   type PresetMenuEntry,
 } from '@chippy/domain';
 import { PlaybackService, type LoopMode } from '../playback.service';
@@ -64,6 +81,15 @@ function detectMobileTracker(): boolean {
   const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
   const narrow = typeof matchMedia === 'function' && matchMedia('(max-width: 768px)').matches;
   return uaMobile || (coarse && narrow);
+}
+
+function clampIndex(value: number, length: number): number {
+  return Math.max(0, Math.min(value, length - 1));
+}
+
+/** Moves focus between LSDJ grid cells, which are rendered by `@for` rather than view queries. */
+function focusById(id: string): void {
+  document.getElementById(id)?.focus();
 }
 
 @Component({
@@ -89,6 +115,17 @@ export class TrackerComponent {
 
   readonly state = this.session.state;
   readonly playRow = this.playback.row;
+  /** Flat block being played, resolved back to the LSDJ song row / chain step. */
+  private readonly playSlot = computed(() => {
+    const hierarchy = this.songBody().lsdj;
+    const tick = this.playback.tick();
+    if (!hierarchy || !tick || !this.playback.playing()) {
+      return null;
+    }
+    return channelFlatSlots(hierarchy)[this.state().cursor.channel]?.[tick.orderIndex] ?? null;
+  });
+  readonly playSongRow = computed(() => this.playSlot()?.songRow ?? null);
+  readonly playChainStep = computed(() => this.playSlot()?.chainStep ?? null);
   readonly status = signal('');
   readonly loop = signal<LoopMode>('off');
   private readonly loopCycle: LoopMode[] = ['off', 'pattern', 'song'];
@@ -157,17 +194,144 @@ export class TrackerComponent {
   });
   readonly orderEntries = computed(() => {
     const body = this.songBody();
+    const derived = body.lsdj ? derivedOrderEntries(body.lsdj) : null;
     return body.order.map((id, index) => {
       const pattern = body.patterns.find((item) => item.id === id);
       const name = pattern ? patternDisplayName(pattern, index) : `Pattern ${index + 1}`;
+      const entry = derived?.[index];
       return {
         id,
         slotKey: `${index}-${id}`,
         indexLabel: String(index + 1).padStart(2, '0'),
         name,
+        phraseLabel: entry ? entry.phrases.map((slot) => lsdjHex(slot)).join(' ') : '',
+        shared: entry?.shared ?? false,
       };
     });
   });
+
+  readonly lsdjMode = computed(() => Boolean(this.songBody().lsdj?.enabled));
+  readonly hierarchy = computed(() => this.songBody().lsdj ?? null);
+  readonly lsdjModeBlocked = computed(() => {
+    if (!this.isGameBoy()) {
+      return 'LSDJ mode is Game Boy only.';
+    }
+    const availability = this.session.lsdjModeAvailable();
+    return availability.ok ? null : availability.reason;
+  });
+  /** Which channel column the Song screen cursor is in. */
+  readonly songChannel = computed(() => this.state().cursor.channel);
+  readonly focusChainIndex = computed(() => {
+    const hierarchy = this.hierarchy();
+    return hierarchy ? focusedChainIndex(hierarchy, this.songChannel()) : null;
+  });
+  readonly focusChain = computed(() => {
+    const hierarchy = this.hierarchy();
+    return hierarchy ? findChain(hierarchy, this.focusChainIndex()) : null;
+  });
+  readonly focusPhraseIndex = computed(() => {
+    const hierarchy = this.hierarchy();
+    return hierarchy ? focusedPhraseIndex(hierarchy, this.songChannel()) : null;
+  });
+  readonly focusPhrase = computed(() => {
+    const hierarchy = this.hierarchy();
+    return hierarchy ? findPhrase(hierarchy, this.focusPhraseIndex()) : null;
+  });
+  /** Flat block holding the focused chain step, so playing from the cursor starts where the user looks. */
+  private readonly focusFlatOrderIndex = computed(() => {
+    const hierarchy = this.hierarchy();
+    if (!hierarchy) {
+      return null;
+    }
+    const slots = channelFlatSlots(hierarchy)[this.songChannel()] ?? [];
+    const found = slots.findIndex(
+      (slot) => slot.songRow === hierarchy.focus.songRow && slot.chainStep === hierarchy.focus.chainStep,
+    );
+    return found === -1 ? null : found;
+  });
+  /** The cell the cursor edits: a Phrase screen step in LSDJ mode, a Pattern cell otherwise. */
+  private readonly cursorCell = computed(() => {
+    const row = this.state().cursor.row;
+    if (this.lsdjMode()) {
+      return this.focusPhrase()?.steps[row] ?? null;
+    }
+    return this.pattern().rows[row]?.[this.state().cursor.channel] ?? null;
+  });
+
+  /** LSDJ Song screen: used rows plus one blank landing row, four channel columns. */
+  readonly songScreenRows = computed(() => {
+    const hierarchy = this.hierarchy();
+    if (!hierarchy) {
+      return [];
+    }
+    const focus = hierarchy.focus;
+    const channel = this.songChannel();
+    const rowCount = songRowCount(hierarchy);
+    return Array.from({ length: rowCount }, (_, row) => ({
+      row,
+      label: lsdjHex(row),
+      playing: this.playSongRow() === row,
+      cells: Array.from({ length: LSDJ_CHANNELS }, (_, col) => {
+        const chain = chainAt(hierarchy, col, row);
+        return {
+          channel: col,
+          chain,
+          text: chain === null ? '--' : lsdjHex(chain),
+          selected: focus.songRow === row && channel === col,
+        };
+      }),
+    }));
+  });
+  readonly songChannelLabels = LSDJ_CHANNEL_LABELS;
+  readonly lsdjHex = lsdjHex;
+
+  /** LSDJ Chain screen: 16 steps of phrase slot + transpose for the selected chain. */
+  readonly chainScreenRows = computed(() => {
+    const hierarchy = this.hierarchy();
+    const chain = this.focusChain();
+    if (!hierarchy || !chain) {
+      return [];
+    }
+    const focus = hierarchy.focus;
+    return chain.steps.map((step, index) => ({
+      step: index,
+      label: lsdjHex(index, 1),
+      phrase: step.phrase,
+      phraseText: step.phrase === null ? '--' : lsdjHex(step.phrase),
+      transposeText: step.transpose === 0 ? '00' : lsdjHex(step.transpose & 0xff),
+      transpose: step.transpose,
+      selected: focus.chainStep === index,
+      playing: this.playChainStep() === index,
+    }));
+  });
+
+  /** LSDJ Phrase screen: 16 steps of the selected phrase on the selected channel. */
+  readonly phraseScreenRows = computed(() => {
+    const phrase = this.focusPhrase();
+    const cursor = this.state().cursor;
+    return Array.from({ length: LSDJ_PHRASE_LENGTH }, (_, step) => {
+      const cell = phrase?.steps[step] ?? null;
+      return {
+        step,
+        label: lsdjHex(step, 1),
+        playing: this.playRow() === step,
+        cells: this.columns.map((column) => ({
+          column,
+          text: cell ? this.label(column, cell) : '..',
+          selected: cursor.row === step && cursor.column === column,
+        })),
+      };
+    });
+  });
+
+  readonly grooveSteps = computed(() => {
+    const hierarchy = this.hierarchy();
+    if (!hierarchy) {
+      return [6, 6];
+    }
+    return hierarchy.grooves[hierarchy.activeGroove] ?? [6, 6];
+  });
+  readonly activeTables = computed(() => this.hierarchy()?.tables ?? []);
   readonly armed = computed(() => armedInstrument(this.project()));
   readonly chips = chipIds();
   /**
@@ -251,8 +415,7 @@ export class TrackerComponent {
     if (cursor.column !== 'effect') {
       return null;
     }
-    const cell = this.pattern().rows[cursor.row]?.[cursor.channel];
-    const effect = cell?.effect ?? null;
+    const effect = this.cursorCell()?.effect ?? null;
     const display = formatEffect(effect, chip);
     if (!effect) {
       return {
@@ -312,6 +475,11 @@ export class TrackerComponent {
     effect(() => {
       const tick = this.playback.tick();
       if (!tick || !this.playback.playing()) {
+        return;
+      }
+      // LSDJ mode highlights the playhead on the Song/Chain/Phrase screens instead of
+      // dragging the edit cursor through derived flat blocks.
+      if (this.lsdjMode()) {
         return;
       }
       this.session.followPlayback(tick.orderIndex, tick.row);
@@ -543,9 +711,10 @@ export class TrackerComponent {
   play(fromCursor: boolean): void {
     this.radio.stop();
     const state = this.state();
+    const block = this.lsdjMode() ? (this.focusFlatOrderIndex() ?? 0) : state.cursor.orderIndex;
     this.playback.play(
       songForRender(state.project),
-      fromCursor ? state.cursor.orderIndex : 0,
+      fromCursor ? block : 0,
       fromCursor ? state.cursor.row : 0,
       this.loop(),
       new Set(this.muted()),
@@ -857,8 +1026,8 @@ export class TrackerComponent {
           ? ` ${decoded.warnings.join(' ')}`
           : '';
         this.status.set(
-          `Opened LSDJ .sav (Game Boy, format v${decoded.formatVersion}). `
-          + `Chains flattened into Song Order for editing; re-export patches in place.${detail}`,
+          `Opened LSDJ .sav (Game Boy, format v${decoded.formatVersion}) in LSDJ mode.`
+          + detail,
         );
         return;
       }
@@ -919,6 +1088,7 @@ export class TrackerComponent {
           baseSav,
           importMap,
           modified: this.state().dirty,
+          hierarchy: this.songBody().lsdj ?? null,
         })]
         : [aky!.songFile, aky!.configFile];
       bundles.forEach((bundle) => this.download(bundle.bytes, bundle.filename, bundle.mime));
@@ -926,7 +1096,8 @@ export class TrackerComponent {
         kind === 'sav'
           ? files.lsdjSavCompatibilityStatus({
             baseSav,
-            structurePreserved: files.lsdjImportMapAligned(song, importMap),
+            structurePreserved: files.lsdjImportMapAligned(importMap, this.hierarchy()),
+            lsdjMode: this.lsdjMode(),
           })
           : 'Export ready.',
       );
@@ -953,6 +1124,206 @@ export class TrackerComponent {
 
   sessionTempo(value: string): void {
     this.session.tempo(Number(value));
+  }
+
+  toggleLsdjMode(): void {
+    const blocked = this.lsdjModeBlocked();
+    if (!this.lsdjMode() && blocked) {
+      this.status.set(blocked);
+      return;
+    }
+    this.session.toggleLsdjMode();
+    this.status.set(
+      this.lsdjMode()
+        ? 'LSDJ mode on — Song, Chain, and Phrase screens edit the real hierarchy.'
+        : 'LSDJ mode off — flat grid edits the same phrases.',
+    );
+  }
+
+  /** Song screen: select a cell, allocating a chain on an empty one. */
+  selectSongCell(channel: number, songRow: number): void {
+    this.session.selectSongCell(channel, songRow);
+  }
+
+  songCellId(songRow: number, channel: number): string {
+    return `song-${songRow}-${channel}`;
+  }
+
+  chainCellId(step: number, column: number): string {
+    return `chain-${step}-${column}`;
+  }
+
+  /** LSDJ-style arrow navigation across the Song screen grid. */
+  onSongKey(event: KeyboardEvent, songRow: number, channel: number): void {
+    const step = this.gridArrowStep(event);
+    if (!step) {
+      return;
+    }
+    const rows = this.songScreenRows().length;
+    const nextRow = clampIndex(songRow + step.row, rows);
+    const nextChannel = clampIndex(channel + step.column, LSDJ_CHANNEL_LABELS.length);
+    if (nextRow === songRow && nextChannel === channel) {
+      return;
+    }
+    event.preventDefault();
+    focusById(this.songCellId(nextRow, nextChannel));
+  }
+
+  /** LSDJ-style arrow navigation across the Chain screen's phrase and transpose columns. */
+  onChainKey(event: KeyboardEvent, step: number, column: number): void {
+    const delta = this.gridArrowStep(event);
+    if (!delta) {
+      return;
+    }
+    const nextStep = clampIndex(step + delta.row, this.chainScreenRows().length);
+    const nextColumn = clampIndex(column + delta.column, 2);
+    if (nextStep === step && nextColumn === column) {
+      return;
+    }
+    event.preventDefault();
+    focusById(this.chainCellId(nextStep, nextColumn));
+  }
+
+  /**
+   * An arrow key as a grid step, or null when the key should keep its normal meaning.
+   * Left/Right only leave the cell once the caret is against that edge, so typing two
+   * hex digits still works the way it does in any text field.
+   */
+  private gridArrowStep(event: KeyboardEvent): { row: number; column: number } | null {
+    if (event.altKey || event.ctrlKey || event.metaKey) {
+      return null;
+    }
+    const input = event.target as HTMLInputElement;
+    const caret = input.selectionStart ?? 0;
+    switch (event.key) {
+      case 'ArrowUp':
+        return { row: -1, column: 0 };
+      case 'ArrowDown':
+      case 'Enter':
+        return { row: 1, column: 0 };
+      case 'ArrowLeft':
+        return caret === 0 ? { row: 0, column: -1 } : null;
+      case 'ArrowRight':
+        return caret >= input.value.length ? { row: 0, column: 1 } : null;
+      default:
+        return null;
+    }
+  }
+
+  /** Clicking an empty Song cell starts a chain there; arrowing over it must not. */
+  createChainAt(channel: number, songRow: number, chain: number | null): void {
+    if (chain === null) {
+      this.session.addChainAt(channel, songRow);
+    }
+  }
+
+  /** Type hex into a Song screen cell. Blank or `--` clears it. */
+  writeSongCell(channel: number, songRow: number, value: string): void {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === '--') {
+      this.session.writeSongCell(channel, songRow, null);
+      return;
+    }
+    const chain = parseLsdjHex(trimmed);
+    if (chain === null || chain >= LSDJ_MAX_CHAINS) {
+      this.status.set(`Chain numbers are 00–${lsdjHex(LSDJ_MAX_CHAINS - 1)}.`);
+      return;
+    }
+    this.session.writeSongCell(channel, songRow, chain);
+  }
+
+  /** Chain screen: move the focus to a step, which cascades into the Phrase screen. */
+  selectChainStep(step: number): void {
+    this.session.selectChainStep(step);
+  }
+
+  /** Clicking an empty Chain step starts a phrase there; arrowing over it must not. */
+  createPhraseAt(step: number, phrase: number | null): void {
+    const chainIndex = this.focusChainIndex();
+    if (chainIndex === null || phrase !== null) {
+      return;
+    }
+    this.session.addPhraseAt(chainIndex, step);
+  }
+
+  /** Type hex into the Chain screen phrase column. */
+  writeChainPhrase(step: number, value: string): void {
+    const chainIndex = this.focusChainIndex();
+    if (chainIndex === null) {
+      return;
+    }
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === '--') {
+      this.session.writeChainStep(chainIndex, step, { phrase: null });
+      return;
+    }
+    const phrase = parseLsdjHex(trimmed);
+    if (phrase === null || phrase >= LSDJ_MAX_PHRASES) {
+      this.status.set(`Phrase numbers are 00–${lsdjHex(LSDJ_MAX_PHRASES - 1)}.`);
+      return;
+    }
+    this.session.writeChainStep(chainIndex, step, { phrase });
+  }
+
+  /** Type hex into the Chain screen transpose column (signed byte, LSDJ style). */
+  writeChainTranspose(step: number, value: string): void {
+    const chainIndex = this.focusChainIndex();
+    if (chainIndex === null) {
+      return;
+    }
+    const byte = parseLsdjHex(value) ?? 0;
+    this.session.writeChainStep(chainIndex, step, { transpose: signedTransposeByte(byte) });
+  }
+
+  /** Phrase screen: move the edit cursor to a step and column. */
+  selectPhraseCell(step: number, column: ColumnId): void {
+    this.session.place(step, this.songChannel(), column);
+  }
+
+  setGrooveStep(stepIndex: number, value: string): void {
+    const hierarchy = this.hierarchy();
+    if (!hierarchy) {
+      return;
+    }
+    const n = Number(value);
+    if (!Number.isFinite(n)) {
+      return;
+    }
+    const steps = [...(hierarchy.grooves[hierarchy.activeGroove] ?? Array(16).fill(0))];
+    steps[stepIndex] = Math.max(0, Math.min(15, Math.round(n)));
+    this.session.writeGroove(hierarchy.activeGroove, steps);
+  }
+
+  setActiveGroove(value: string): void {
+    const hierarchy = this.hierarchy();
+    if (!hierarchy) {
+      return;
+    }
+    const index = Number(value);
+    if (!Number.isFinite(index)) {
+      return;
+    }
+    this.session.writeGroove(Math.max(0, Math.min(30, Math.round(index))), hierarchy.grooves[index] ?? []);
+  }
+
+  updateTableStep(
+    table: LsdjTable,
+    stepIndex: number,
+    field: 'envelope' | 'transpose' | 'cmd1Value' | 'cmd2Value',
+    value: string,
+  ): void {
+    const n = Number(value);
+    if (!Number.isFinite(n)) {
+      return;
+    }
+    const steps = table.steps.map((step, index) =>
+      index === stepIndex ? { ...step, [field]: Math.round(n) & 0xff } : step,
+    );
+    this.session.writeTable({ ...table, steps });
+  }
+
+  addTable(): void {
+    this.session.addTable();
   }
 
   place(row: number, channel: number, column: ColumnId): void {

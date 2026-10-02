@@ -16,31 +16,32 @@ A real mobile tracker remains backlog if Brandon wants it later:
 
 ## LSDJ gaps
 
-Game Boy mode ships **LSDJ phrase FX**, **`.sav` import** (flatten chains → Song Order for editing), and **`.sav` export** (greenfield synthetic chains, or **patch-in-place** when a `.sav` was opened — phrases, tempo, and pulse/wave/noise instrument panel fields). The niche that cares most is people who already write on a physical Game Boy + flash cart and want Chippy as a second editor.
+Game Boy mode ships **LSDJ phrase FX**, **`.sav` import** (full LSDJ hierarchy), and **`.sav` export** (greenfield synthetic or hierarchy encode, or **patch-in-place** when a `.sav` was opened). **LSDJ mode** gives the Game Boy its own Song / Chain / Phrase screens; switching it off falls back to Chippy's flat Song Order + Pattern grid over the same phrases. The niche that cares most is people who already write on a physical Game Boy + flash cart and want Chippy as a second editor.
 
 ### Round-trip principles (standing rules)
 
 These are correctness requirements, not backlog items. Feature work that breaks them is a regression.
 
-1. **Patch-in-place** — When a `.sav` was opened, re-export must write Chippy-owned edits into the original phrase/tempo slots and merge pulse/wave/noise instrument panel fields into those slots (without wiping table/kit/vibrato/length/panning bits), and **never rebuild** sequence, chains, allocations, tables, grooves, wave bank, kits/speech bytes, or file slots from the flattened Song Order. Synthetic chain rebuild from Song Order is allowed **only** for greenfield Chippy→`.sav` exports (no opened base).
+1. **Patch-in-place** — When a `.sav` was opened, re-export must write Chippy-owned edits into the original phrase/tempo/chain/sequence/table/groove slots and merge pulse/wave/noise instrument panel fields into those slots (without wiping kit/vibrato/length/panning bits), and **never rebuild** unsupported allocations, kits/speech bytes, or file slots from a flattened Song Order alone. Synthetic chain rebuild from Song Order is allowed **only** for greenfield Chippy→`.sav` exports without hierarchy (no opened base, never used LSDJ mode).
 2. **Identity invariant** — Import `.sav` → make **no** modifications in Chippy → export `.sav` must be **byte-for-byte identical** to the file that was opened (128 KiB), regardless of which LSDJ features Chippy can edit or preview today.
+3. **Slot fidelity** — Phrases, chains, and tables carry their real LSDJ slot numbers, and phrases are single-channel exactly as LSDJ stores them. Nothing may reintroduce id→slot indirection or 4-channel-wide phrases.
 
 ### Burn down (editability)
 
-Preserve-on-reexport and format-version reporting are in place. Remaining work deepens what Chippy can *edit*, not whether unsupported data survives the trip:
+Preserve-on-reexport and format-version reporting are in place. **LSDJ mode** (Song / Chain / Phrase screens), **Tables**, and **Grooves** editors ship on this track. Remaining work:
 
-1. **Chains UI** — real chain/phrase hierarchy (edit shared phrases / transpose in Chippy, not only flattened view + patch-in-place)
-2. **Tables** — editor + alloc; unlocks `A` and table-driven timbre from imported saves
-3. **Grooves** — beyond default `6,6`; unlocks `G` from imported saves
+1. ~~**Chains UI**~~ — LSDJ mode: Song screen (4 channel columns of chain numbers), Chain screen (phrase + transpose), Phrase screen; selection cascades Song → Chain → Phrase; auto-on for `.sav` open
+2. ~~**Tables**~~ — editor + alloc; unlocks `A` and table-driven timbre from imported saves
+3. ~~**Grooves**~~ — beyond default `6,6`; unlocks `G` from imported saves
 4. **Synth / wave frames** — softsynth + wave bank; deeper `F` / wave instruments from saves
 5. **Kit instruments** — kits, kit note names, kit-specific `S` (bytes are preserved today; not editable as kits)
 6. **Speech instrument** — words / allophones
 7. **File slots / `.lsdsng`** — read/write compressed projects in the upper 96KB; multi-song from one cart dump
 8. **Arduinoboy commands** — **Ask Brandon before implementing.** Do not add `N` / `X` / `Q` / `Y` until he confirms he wants sync/hardware support.
-9. **Engine preview gaps** — keep honest any phrase command that exports/imports but is still approximate in Web Audio (`A` / `G` / deep `F` today; `B` vibrato semantics)
+9. **Engine preview gaps** — keep honest any phrase command that exports/imports but is still approximate in Web Audio (deep `F` today; `B` vibrato semantics; table/groove preview is approximate)
 10. **Greenfield empty-song bump** — vendored work-song template is still libLSDJ format **v7** (LSDJ 9.x loads it). When a verified LSDJ 9.x empty dump is available, replace the template; opened saves already keep their own format version on patch-in-place re-export.
 
-Shipped on the preserve path (not in the burn-down above): phrase/tempo patch-in-place, and **instrument merge** — pulse/wave/noise panel field edits write back into opened `.sav` slots without wiping table/kit/vibrato/length/panning bits. Kit/speech slots stay untouched.
+Shipped on the preserve path (not in the burn-down above): phrase/tempo/chain/table/groove patch-in-place, and **instrument merge** — pulse/wave/noise panel field edits write back into opened `.sav` slots without wiping table/kit/vibrato/length/panning bits. Kit/speech slots stay untouched.
 
 ## More chips and tools
 
@@ -58,7 +59,7 @@ Replace auth stubs so donors get ad-free sessions and premium presets without `p
 
 ## Tracker consistency wins
 
-Shipped: richer shared FX on non-GB chips, Game Boy LSDJ FX + `.sav` export/import with patch-in-place preserve (including instrument panel merge), Radio reconnect, CORS-gated viz, Rainwave now-playing.
+Shipped: richer shared FX on non-GB chips, Game Boy LSDJ FX + `.sav` export/import with patch-in-place preserve (including the LSDJ hierarchy, tables, grooves, and instrument panel merge), Radio reconnect, CORS-gated viz, Rainwave now-playing.
 
 Still open:
 

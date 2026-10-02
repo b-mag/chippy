@@ -1,4 +1,5 @@
 import { chipDefinition } from './chips';
+import { syncFlatProjection } from './lsdj-hierarchy';
 import {
   PATTERN_ROWS,
   PROJECT_VERSION,
@@ -31,6 +32,7 @@ export function blankSongBody(id = 'song-1', name = 'Song 1', channelCount = 4):
     tempo: 120,
     order: [pattern.id],
     patterns: [pattern],
+    lsdj: null,
   };
 }
 
@@ -57,7 +59,10 @@ export function activeSongBody(project: Project): SongBody {
 
 /** Flat view for engines, playback, and exports. */
 export function songForRender(project: Project): Song {
-  const body = activeSongBody(project);
+  let body = activeSongBody(project);
+  if (body.lsdj) {
+    body = syncFlatProjection(body);
+  }
   return {
     name: body.name,
     chip: project.chip,

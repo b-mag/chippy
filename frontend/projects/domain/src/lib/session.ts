@@ -13,6 +13,27 @@ import {
 } from './presets';
 import { ensureChannelInstruments, fillPatternRandom, randomProject } from './random-song';
 import {
+  addHierarchyTable,
+  allocateChainAt,
+  allocatePhraseAt,
+  canExpandFlatToHierarchy,
+  clearPhrase,
+  expandFlatToHierarchy,
+  focusedPhraseIndex,
+  reexpandHierarchyFromFlat,
+  setChainStep,
+  setHierarchyFocus,
+  setLsdjEnabled,
+  setSequenceCell,
+  syncFlatProjection,
+  updateHierarchyGroove,
+  updateHierarchyTable,
+  writeFlatCell,
+  writePhraseStep,
+  type LsdjFocus,
+  type LsdjTable,
+} from './lsdj-hierarchy';
+import {
   activeSongBody,
   blankPattern,
   blankSongBody,
@@ -131,16 +152,22 @@ const LOWER_ROW = 'zsxdcvgbhnjm';
 /** Upper keyboard row, one octave higher. Q is C. */
 const UPPER_ROW = 'q2w3er5t6y7u';
 
-/** Phrase slot mapping kept when a Game Boy `.sav` was opened (files layer fills this). */
+/** Phrase slot reference kept when a Game Boy `.sav` was opened (files layer fills this). */
 export interface LsdjPhraseRef {
   phrase: number;
   transpose: number;
 }
 
-/** Import map for patch-in-place `.sav` re-export. */
+/**
+ * Import map for patch-in-place `.sav` re-export.
+ * Phrase, chain, and table slots live on the hierarchy itself, so this only carries
+ * what the hierarchy cannot: which instrument slots Chippy is allowed to overwrite,
+ * and which hierarchy slots were allocated in the opened file.
+ */
 export interface LsdjImportMap {
-  channelPhrases: LsdjPhraseRef[][];
   editableInstruments: number[];
+  /** Table slots that were already allocated in the opened `.sav`. */
+  allocatedTables: number[];
 }
 
 export interface SessionState {
@@ -286,16 +313,30 @@ function writePattern(body: SongBody, pattern: Pattern): SongBody {
   };
 }
 
+/**
+ * Route a cell write to the right canonical store: the focused LSDJ phrase while LSDJ mode
+ * is on, the phrase behind the flat block when the hierarchy exists but the mode is off,
+ * and the pattern itself for plain Chippy songs.
+ */
+function writeCursorCell(body: SongBody, cursor: Cursor, cell: Cell): SongBody {
+  if (body.lsdj?.enabled) {
+    const phrase = focusedPhraseIndex(body.lsdj, cursor.channel);
+    return phrase === null ? body : writePhraseStep(body, phrase, cursor.row, cell);
+  }
+  if (body.lsdj) {
+    return writeFlatCell(body, cursor.orderIndex, cursor.channel, cursor.row, cell);
+  }
+  const pattern = currentPattern(body, cursor);
+  const rows = pattern.rows.map((row) => row.map((item) => ({ ...item })));
+  rows[cursor.row][cursor.channel] = cell;
+  return writePattern(body, { ...pattern, rows });
+}
+
 function writeCell(state: SessionState, cell: Cell, advance: boolean): SessionState {
   if (channelIsPlaceholder(state.project.chip, state.cursor.channel)) {
     return state;
   }
-  const next = mutateActiveSong(state, (body) => {
-    const pattern = currentPattern(body, state.cursor);
-    const rows = pattern.rows.map((row) => row.map((item) => ({ ...item })));
-    rows[state.cursor.row][state.cursor.channel] = cell;
-    return writePattern(body, { ...pattern, rows });
-  });
+  const next = mutateActiveSong(state, (body) => writeCursorCell(body, state.cursor, cell));
   if (!advance) {
     return next;
   }
@@ -430,14 +471,17 @@ export function findInstrumentIdByNumberLabel(project: Project, label: string): 
 
 export function moveCursor(state: SessionState, deltaRow: number, deltaChannel: number, deltaColumn: number): SessionState {
   const channelCount = chipDefinition(state.project.chip).channels.length;
+  // The Phrase screen shows one channel, so columns wrap in place instead of spilling
+  // into the neighbouring channel the way the flat Pattern grid does.
+  const wrapInChannel = activeSongBody(state.project).lsdj?.enabled === true;
   let columnIndex = COLUMNS.indexOf(state.cursor.column) + deltaColumn;
   let channel = state.cursor.channel;
   if (columnIndex < 0) {
     columnIndex = COLUMNS.length - 1;
-    channel -= 1;
+    channel -= wrapInChannel ? 0 : 1;
   } else if (columnIndex >= COLUMNS.length) {
     columnIndex = 0;
-    channel += 1;
+    channel += wrapInChannel ? 0 : 1;
   }
   channel = Math.min(channelCount - 1, Math.max(0, channel + deltaChannel));
   const row = Math.min(PATTERN_ROWS - 1, Math.max(0, state.cursor.row + deltaRow));
@@ -481,11 +525,12 @@ export function addPattern(state: SessionState): SessionState {
   const next = mutateActiveSong(state, (body) => {
     const id = nextPatternId(body);
     const pattern = blankPattern(id, nextBlankPatternName(body), channelCount);
-    return {
+    const arranged = {
       ...body,
       patterns: [...body.patterns, pattern],
       order: [...body.order, id],
     };
+    return body.lsdj ? reexpandHierarchyFromFlat(arranged, channelCount) : arranged;
   });
   const orderLength = activeSongBody(next.project).order.length;
   return {
@@ -496,6 +541,7 @@ export function addPattern(state: SessionState): SessionState {
 
 export function duplicatePattern(state: SessionState): SessionState {
   let insertAt = state.cursor.orderIndex + 1;
+  const channelCount = chipDefinition(state.project.chip).channels.length;
   const next = mutateActiveSong(state, (body) => {
     const sourceId = body.order[state.cursor.orderIndex] ?? body.order[0];
     const source = body.patterns.find((item) => item.id === sourceId) ?? body.patterns[0];
@@ -507,11 +553,12 @@ export function duplicatePattern(state: SessionState): SessionState {
       rows: structuredClone(source.rows),
     };
     insertAt = Math.min(state.cursor.orderIndex + 1, body.order.length);
-    return {
+    const arranged = {
       ...body,
       patterns: [...body.patterns, pattern],
       order: [...body.order.slice(0, insertAt), id, ...body.order.slice(insertAt)],
     };
+    return body.lsdj ? reexpandHierarchyFromFlat(arranged, channelCount) : arranged;
   });
   return {
     ...next,
@@ -531,11 +578,13 @@ export function reorderOrder(state: SessionState, fromIndex: number, toIndex: nu
     return state;
   }
   let orderIndex = state.cursor.orderIndex;
+  const channelCount = chipDefinition(state.project.chip).channels.length;
   const next = mutateActiveSong(state, (current) => {
     const order = [...current.order];
     const [moved] = order.splice(fromIndex, 1);
     order.splice(toIndex, 0, moved);
-    return { ...current, order };
+    const arranged = { ...current, order };
+    return current.lsdj ? reexpandHierarchyFromFlat(arranged, channelCount) : arranged;
   });
   if (orderIndex === fromIndex) {
     orderIndex = toIndex;
@@ -560,6 +609,10 @@ export function renamePattern(state: SessionState, id: string, name: string): Se
   if (!existing || existing.name === trimmed) {
     return state;
   }
+  if (body.lsdj) {
+    // Flat blocks are derived from the hierarchy; LSDJ phrases are numbered, not named.
+    return state;
+  }
   return mutateActiveSong(state, (current) => ({
     ...current,
     patterns: current.patterns.map((item) => (item.id === id ? { ...item, name: trimmed } : item)),
@@ -572,13 +625,15 @@ export function removeOrderEntry(state: SessionState): SessionState {
     return state;
   }
   const removeIndex = state.cursor.orderIndex;
+  const channelCount = chipDefinition(state.project.chip).channels.length;
   const next = mutateActiveSong(state, (current) => {
     const removedId = current.order[removeIndex];
     const order = current.order.filter((_, index) => index !== removeIndex);
     const patterns = order.includes(removedId)
       ? current.patterns
       : current.patterns.filter((item) => item.id !== removedId);
-    return { ...current, order, patterns };
+    const arranged = { ...current, order, patterns };
+    return current.lsdj ? reexpandHierarchyFromFlat(arranged, channelCount) : arranged;
   });
   const orderIndex = Math.min(removeIndex, activeSongBody(next.project).order.length - 1);
   return {
@@ -589,6 +644,19 @@ export function removeOrderEntry(state: SessionState): SessionState {
 
 export function clearPattern(state: SessionState): SessionState {
   return mutateActiveSong(state, (body) => {
+    if (body.lsdj?.enabled) {
+      const phrase = focusedPhraseIndex(body.lsdj, state.cursor.channel);
+      return phrase === null ? body : clearPhrase(body, phrase);
+    }
+    if (body.lsdj) {
+      let next = body;
+      for (let channel = 0; channel < 4; channel += 1) {
+        for (let row = 0; row < PATTERN_ROWS; row += 1) {
+          next = writeFlatCell(next, state.cursor.orderIndex, channel, row, emptyCell());
+        }
+      }
+      return next;
+    }
     const pattern = currentPattern(body, state.cursor);
     const cleared: Pattern = {
       ...pattern,
@@ -612,11 +680,12 @@ export function addRandomPattern(state: SessionState, seed: number): SessionStat
       withInstruments.project.armedInstrumentId,
       seed,
     );
-    return {
+    const arranged = {
       ...body,
       patterns: [...body.patterns, pattern],
       order: [...body.order, id],
     };
+    return body.lsdj ? reexpandHierarchyFromFlat(arranged, channelCount) : arranged;
   });
   return {
     ...next,
@@ -989,6 +1058,97 @@ export function addSnipInstrument(project: Project, name: string, frames: number
 
 export function setOctave(state: SessionState, octave: number): SessionState {
   return { ...state, octave: Math.min(7, Math.max(1, octave)) };
+}
+
+/** Whether LSDJ mode can be switched on for the active song. */
+export function lsdjModeAvailability(
+  state: SessionState,
+): { ok: true } | { ok: false; reason: string } {
+  if (state.project.chip !== 'gameboy') {
+    return { ok: false, reason: 'LSDJ mode is Game Boy only.' };
+  }
+  return canExpandFlatToHierarchy(activeSongBody(state.project), 4);
+}
+
+/** Turn the LSDJ mode screens on, expanding a flat song into a hierarchy the first time. */
+export function enableLsdjMode(state: SessionState): SessionState {
+  if (lsdjModeAvailability(state).ok !== true) {
+    return state;
+  }
+  return mutateActiveSong(state, (body) => expandFlatToHierarchy(body, 4));
+}
+
+/** Turn the LSDJ mode screens off. The hierarchy stays canonical behind the flat grid. */
+export function disableLsdjMode(state: SessionState): SessionState {
+  return mutateActiveSong(state, (body) => setLsdjEnabled(body, false));
+}
+
+export function toggleLsdjMode(state: SessionState): SessionState {
+  return activeSongBody(state.project).lsdj?.enabled ? disableLsdjMode(state) : enableLsdjMode(state);
+}
+
+/** Select a Song screen cell: moves the cursor channel and re-targets Chain + Phrase. */
+export function selectSongCell(state: SessionState, channel: number, songRow: number): SessionState {
+  const next = mutateActiveSong(state, (body) => setHierarchyFocus(body, { songRow }));
+  return {
+    ...next,
+    cursor: { ...next.cursor, channel: Math.min(3, Math.max(0, channel)) },
+  };
+}
+
+/** Select a Chain screen step, which re-targets the Phrase screen. */
+export function selectChainStep(state: SessionState, chainStep: number): SessionState {
+  return mutateActiveSong(state, (body) => setHierarchyFocus(body, { chainStep }));
+}
+
+export function focusHierarchy(state: SessionState, patch: Partial<LsdjFocus>): SessionState {
+  return mutateActiveSong(state, (body) => setHierarchyFocus(body, patch));
+}
+
+/** Type a chain number into a Song screen cell (null clears it). */
+export function writeSongCell(
+  state: SessionState,
+  channel: number,
+  songRow: number,
+  chain: number | null,
+): SessionState {
+  return mutateActiveSong(state, (body) => setSequenceCell(body, channel, songRow, chain));
+}
+
+/** Put the next free chain into a Song screen cell and select it. */
+export function addChainAt(state: SessionState, channel: number, songRow: number): SessionState {
+  return mutateActiveSong(state, (body) => allocateChainAt(body, channel, songRow));
+}
+
+/** Type a phrase number or transpose into a Chain screen step. */
+export function writeChainStep(
+  state: SessionState,
+  chainIndex: number,
+  step: number,
+  patch: { phrase?: number | null; transpose?: number },
+): SessionState {
+  return mutateActiveSong(state, (body) => setChainStep(body, chainIndex, step, patch));
+}
+
+/** Put the next free phrase into a Chain screen step and select it. */
+export function addPhraseAt(state: SessionState, chainIndex: number, step: number): SessionState {
+  return mutateActiveSong(state, (body) => allocatePhraseAt(body, chainIndex, step));
+}
+
+export function writeGroove(state: SessionState, grooveIndex: number, steps: number[]): SessionState {
+  return mutateActiveSong(state, (body) => updateHierarchyGroove(body, grooveIndex, steps));
+}
+
+export function writeTable(state: SessionState, table: LsdjTable): SessionState {
+  return mutateActiveSong(state, (body) => updateHierarchyTable(body, table));
+}
+
+export function addTable(state: SessionState): SessionState {
+  return mutateActiveSong(state, (body) => addHierarchyTable(body));
+}
+
+export function refreshLsdjProjection(state: SessionState): SessionState {
+  return mutateActiveSong(state, (body) => syncFlatProjection(body));
 }
 
 export { activeSongBody, songForRender };

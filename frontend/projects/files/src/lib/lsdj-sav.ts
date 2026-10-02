@@ -1,17 +1,29 @@
 import {
   baseInstrument,
-  emptyCell,
-  PATTERN_ROWS,
+  blankLsdjChain,
+  blankLsdjPhrase,
+  blankLsdjTable,
+  blankTableStep,
+  defaultGrooves,
+  emptySequence,
   PROJECT_VERSION,
+  syncFlatProjection,
+  toTransposeByte,
   type Cell,
   type EffectCmd,
   type Instrument,
   type InstrumentKind,
+  type LsdjChain,
+  type LsdjChainStep,
+  type LsdjHierarchy,
   type LsdjImportMap,
+  type LsdjPhrase,
   type LsdjPhraseRef,
-  type Pattern,
+  type LsdjTable,
+  type LsdjTableStep,
   type Project,
   type Song,
+  type SongBody,
 } from '@chippy/domain';
 import { WAVEFORMS } from '@chippy/engines';
 import { createEmptyLsdjSong } from './lsdj-empty-song';
@@ -41,17 +53,28 @@ const MAX_PHRASES = 255;
 const MAX_CHAINS = 128;
 const MAX_INSTRUMENTS = 64;
 const MAX_SEQUENCE_ROWS = 256;
+const MAX_TABLES = 32;
+const MAX_GROOVES = 31;
+const GROOVE_LENGTH = 16;
+const TABLE_LENGTH = 16;
 
 const OFF = {
   phraseNotes: 0x0000,
   grooves: 0x1090,
   sequence: 0x1290,
+  tableEnvelopes: 0x1690,
   rb1: 0x1e78,
   instrumentNames: 0x1e7a,
+  tableAlloc: 0x2020,
   instrAlloc: 0x2040,
   chainPhrases: 0x2080,
   chainTransposes: 0x2880,
   instruments: 0x3080,
+  tableTransposition: 0x3480,
+  tableCommand1: 0x3680,
+  tableCommand1Value: 0x3880,
+  tableCommand2: 0x3a80,
+  tableCommand2Value: 0x3c80,
   rb2: 0x3e80,
   phraseAlloc: 0x3e82,
   chainAlloc: 0x3ea2,
@@ -121,11 +144,14 @@ export interface LsdjEncodeOptions {
    * With baseSav, encode returns a byte-identical clone (identity invariant).
    */
   modified?: boolean;
+  /** LSDJ hierarchy when present (phrases/chains/tables/grooves). */
+  hierarchy?: LsdjHierarchy | null;
 }
 
-/** Result of opening an LSDJ `.sav` into Chippy's flat Song model. */
+/** Result of opening an LSDJ `.sav` into Chippy (flat Song + LSDJ hierarchy). */
 export interface LsdjDecodeResult {
   song: Song;
+  hierarchy: LsdjHierarchy;
   warnings: string[];
   formatVersion: number;
   importMap: LsdjImportMap;
@@ -336,13 +362,167 @@ function writePhrase(
   }
 }
 
-function writeChain(song: Uint8Array, chain: number, phrases: number[]): void {
+function writeChain(
+  song: Uint8Array,
+  chain: number,
+  steps: Array<{ phrase: number; transpose?: number } | null>,
+): void {
   for (let step = 0; step < CHAIN_LENGTH; step += 1) {
-    const phrase = phrases[step] ?? NO_PHRASE;
+    const entry = steps[step];
+    const phrase = entry?.phrase ?? NO_PHRASE;
     song[OFF.chainPhrases + chain * CHAIN_LENGTH + step] = phrase;
-    song[OFF.chainTransposes + chain * CHAIN_LENGTH + step] = 0;
+    song[OFF.chainTransposes + chain * CHAIN_LENGTH + step] = entry
+      ? toTransposeByte(entry.transpose ?? 0)
+      : 0;
   }
   setBit(song.subarray(OFF.chainAlloc, OFF.chainAlloc + 16), chain);
+}
+
+/**
+ * Write phrases, chains, and the sequence at their own LSDJ slot indices.
+ * The hierarchy carries real slot numbers, so greenfield and patch-in-place share this path.
+ */
+function writeHierarchy(
+  song: Uint8Array,
+  hierarchy: LsdjHierarchy,
+  instrumentIndex: (id: string | null) => number,
+): void {
+  for (const phrase of hierarchy.phrases) {
+    if (phrase.index < 0 || phrase.index >= MAX_PHRASES) {
+      continue;
+    }
+    writePhrase(song, phrase.index, phrase.steps, instrumentIndex);
+  }
+  for (const chain of hierarchy.chains) {
+    if (chain.index < 0 || chain.index >= MAX_CHAINS) {
+      continue;
+    }
+    writeChain(
+      song,
+      chain.index,
+      chain.steps.map((step) =>
+        step.phrase === null ? null : { phrase: step.phrase, transpose: step.transpose },
+      ),
+    );
+  }
+  for (let row = 0; row < MAX_SEQUENCE_ROWS; row += 1) {
+    for (let channel = 0; channel < 4; channel += 1) {
+      const chain = hierarchy.sequence[channel]?.[row];
+      song[OFF.sequence + row * 4 + channel] =
+        chain === null || chain === undefined || chain >= MAX_CHAINS ? NO_CHAIN : chain;
+    }
+  }
+}
+
+function writeGrooves(song: Uint8Array, grooves: number[][]): void {
+  for (let g = 0; g < MAX_GROOVES; g += 1) {
+    const steps = grooves[g] ?? [];
+    for (let step = 0; step < GROOVE_LENGTH; step += 1) {
+      song[OFF.grooves + g * GROOVE_LENGTH + step] = (steps[step] ?? 0) & 0xff;
+    }
+  }
+}
+
+function readGrooves(song: Uint8Array): number[][] {
+  const grooves = defaultGrooves();
+  for (let g = 0; g < MAX_GROOVES; g += 1) {
+    for (let step = 0; step < GROOVE_LENGTH; step += 1) {
+      grooves[g][step] = song[OFF.grooves + g * GROOVE_LENGTH + step] & 0xff;
+    }
+  }
+  return grooves;
+}
+
+function commandByteToCmd(byte: number, formatVersion: number): EffectCmd | null {
+  let mapped = byte;
+  if (formatVersion >= 8) {
+    if (byte === 1) {
+      return 'B';
+    }
+    if (byte > 1) {
+      mapped = byte - 1;
+    }
+  }
+  return LSDJ_BYTE_TO_CMD[mapped] ?? null;
+}
+
+function cmdToTableByte(cmd: EffectCmd | null, formatVersion: number): number {
+  if (!cmd) {
+    return 0;
+  }
+  const base = commandByte(cmd);
+  if (formatVersion >= 8) {
+    if (cmd === 'B') {
+      return 1;
+    }
+    if (base > 1) {
+      return base + 1;
+    }
+  }
+  return base;
+}
+
+function readTables(song: Uint8Array, formatVersion: number): LsdjTable[] {
+  const tables: LsdjTable[] = [];
+  for (let index = 0; index < MAX_TABLES; index += 1) {
+    if (song[OFF.tableAlloc + index] !== 1) {
+      continue;
+    }
+    const steps: LsdjTableStep[] = [];
+    for (let step = 0; step < TABLE_LENGTH; step += 1) {
+      const offset = index * TABLE_LENGTH + step;
+      steps.push({
+        envelope: song[OFF.tableEnvelopes + offset] & 0xff,
+        transpose: song[OFF.tableTransposition + offset] & 0xff,
+        cmd1: commandByteToCmd(song[OFF.tableCommand1 + offset], formatVersion),
+        cmd1Value: song[OFF.tableCommand1Value + offset] & 0xff,
+        cmd2: commandByteToCmd(song[OFF.tableCommand2 + offset], formatVersion),
+        cmd2Value: song[OFF.tableCommand2Value + offset] & 0xff,
+      });
+    }
+    tables.push({ index, steps });
+  }
+  if (tables.length === 0) {
+    tables.push(blankLsdjTable(0));
+  }
+  return tables;
+}
+
+/**
+ * Write tables at their own slot indices. When patching an opened `.sav`, only slots that
+ * were already allocated are touched so LSDJ's allocation table is left intact.
+ */
+function writeTables(
+  song: Uint8Array,
+  tables: LsdjTable[],
+  formatVersion: number,
+  allocatedTables?: number[],
+): void {
+  const patchMode = allocatedTables !== undefined;
+  const allowed = patchMode ? new Set(allocatedTables) : null;
+  if (!patchMode) {
+    song.fill(0, OFF.tableAlloc, OFF.tableAlloc + MAX_TABLES);
+  }
+  for (const table of tables) {
+    const slot = table.index;
+    if (slot < 0 || slot >= MAX_TABLES) {
+      continue;
+    }
+    if (allowed && !allowed.has(slot)) {
+      continue;
+    }
+    song[OFF.tableAlloc + slot] = 1;
+    for (let step = 0; step < TABLE_LENGTH; step += 1) {
+      const row = table.steps[step] ?? blankTableStep();
+      const offset = slot * TABLE_LENGTH + step;
+      song[OFF.tableEnvelopes + offset] = row.envelope & 0xff;
+      song[OFF.tableTransposition + offset] = row.transpose & 0xff;
+      song[OFF.tableCommand1 + offset] = cmdToTableByte(row.cmd1, formatVersion);
+      song[OFF.tableCommand1Value + offset] = row.cmd1Value & 0xff;
+      song[OFF.tableCommand2 + offset] = cmdToTableByte(row.cmd2, formatVersion);
+      song[OFF.tableCommand2Value + offset] = row.cmd2Value & 0xff;
+    }
+  }
 }
 
 function setTempo(song: Uint8Array, bpm: number): void {
@@ -387,7 +567,39 @@ function instrumentIndexLookup(instruments: Instrument[]): (id: string | null) =
   };
 }
 
-function encodeGreenfield(song: Song): Uint8Array {
+function encodeHierarchyGreenfield(song: Song, hierarchy: LsdjHierarchy): Uint8Array {
+  const songBytes = createEmptyLsdjSong();
+  setTempo(songBytes, song.tempo);
+  writeWaveforms(songBytes);
+  writeGrooves(songBytes, hierarchy.grooves);
+
+  const instruments = song.instruments.slice(0, MAX_INSTRUMENTS);
+  instruments.forEach((instrument, index) => {
+    writeInstrument(songBytes, index, instrument);
+  });
+  const instrumentIndex = instrumentIndexLookup(instruments);
+  const formatVersion = songBytes[OFF.formatVersion] ?? LSDJ_GREENFIELD_FORMAT_VERSION;
+
+  writeHierarchy(songBytes, hierarchy, instrumentIndex);
+  writeTables(songBytes, hierarchy.tables, formatVersion);
+
+  songBytes[OFF.rb1] = 0x72;
+  songBytes[OFF.rb1 + 1] = 0x62;
+  songBytes[OFF.rb2] = 0x72;
+  songBytes[OFF.rb2 + 1] = 0x62;
+  songBytes[OFF.rb3] = 0x72;
+  songBytes[OFF.rb3 + 1] = 0x62;
+
+  const sav = new Uint8Array(LSDJ_SAV_SIZE);
+  sav.set(songBytes, 0);
+  sav.set(buildFileMemory(), SONG_SIZE);
+  return sav;
+}
+
+function encodeGreenfield(song: Song, hierarchy?: LsdjHierarchy | null): Uint8Array {
+  if (hierarchy?.enabled) {
+    return encodeHierarchyGreenfield(song, hierarchy);
+  }
   const songBytes = createEmptyLsdjSong();
   setTempo(songBytes, song.tempo);
   writeWaveforms(songBytes);
@@ -425,7 +637,11 @@ function encodeGreenfield(song: Song): Uint8Array {
         throw new Error(`Song is too large for LSDJ (more than ${MAX_CHAINS} chains).`);
       }
       const chunk = phraseList.slice(i, i + CHAIN_LENGTH);
-      writeChain(songBytes, nextChain, chunk);
+      writeChain(
+        songBytes,
+        nextChain,
+        chunk.map((phrase) => ({ phrase, transpose: 0 })),
+      );
       channelChains[channel].push(nextChain);
       nextChain += 1;
     }
@@ -465,6 +681,7 @@ function encodePatchInPlace(
   song: Song,
   baseSav: Uint8Array,
   importMap: LsdjImportMap,
+  hierarchy?: LsdjHierarchy | null,
 ): Uint8Array {
   if (baseSav.length !== LSDJ_SAV_SIZE) {
     throw new Error(`LSDJ base .sav must be ${LSDJ_SAV_SIZE} bytes (got ${baseSav.length}).`);
@@ -478,26 +695,14 @@ function encodePatchInPlace(
   mergeEditableInstruments(songBytes, song.instruments, importMap.editableInstruments);
 
   const instrumentIndex = instrumentIndexLookup(song.instruments);
+  const formatVersion = songBytes[OFF.formatVersion];
 
-  const orderLen = song.order.length;
-  for (let channel = 0; channel < 4; channel += 1) {
-    const refs = importMap.channelPhrases[channel] ?? [];
-    const limit = Math.min(orderLen, refs.length);
-    for (let orderIndex = 0; orderIndex < limit; orderIndex += 1) {
-      const ref = refs[orderIndex];
-      if (!ref) {
-        continue;
-      }
-      const patternId = song.order[orderIndex];
-      const pattern = song.patterns.find((item) => item.id === patternId);
-      if (!pattern) {
-        continue;
-      }
-      const cells: Cell[] = pattern.rows.map((row) => row[channel] ?? {
-        note: null, cut: false, instrumentId: null, volume: null, effect: null,
-      });
-      writePhrase(songBytes, ref.phrase, cells, instrumentIndex, ref.transpose, false);
-    }
+  // Without a hierarchy there is no structure to patch, so instruments and tempo are all
+  // that change and the rest of the opened file is left exactly as it was.
+  if (hierarchy) {
+    writeGrooves(songBytes, hierarchy.grooves);
+    writeTables(songBytes, hierarchy.tables, formatVersion, importMap.allocatedTables);
+    writeHierarchy(songBytes, hierarchy, instrumentIndex);
   }
 
   return sav;
@@ -514,6 +719,7 @@ export function encodeLsdjSav(song: Song, options?: LsdjEncodeOptions): Uint8Arr
   }
   const baseSav = options?.baseSav ?? null;
   const importMap = options?.importMap ?? null;
+  const hierarchy = options?.hierarchy ?? null;
   if (baseSav) {
     if (options?.modified === false) {
       if (baseSav.length !== LSDJ_SAV_SIZE) {
@@ -524,9 +730,9 @@ export function encodeLsdjSav(song: Song, options?: LsdjEncodeOptions): Uint8Arr
     if (!importMap) {
       throw new Error('LSDJ patch-in-place export requires the import map from decode.');
     }
-    return encodePatchInPlace(song, baseSav, importMap);
+    return encodePatchInPlace(song, baseSav, importMap, hierarchy);
   }
-  return encodeGreenfield(song);
+  return encodeGreenfield(song, hierarchy);
 }
 
 /**
@@ -535,18 +741,22 @@ export function encodeLsdjSav(song: Song, options?: LsdjEncodeOptions): Uint8Arr
 export function lsdjSavCompatibilityStatus(options?: {
   baseSav?: Uint8Array | null;
   structurePreserved?: boolean;
+  lsdjMode?: boolean;
 }): string {
   const hasBase = Boolean(options?.baseSav && options.baseSav.length === LSDJ_SAV_SIZE);
   const preserved = options?.structurePreserved !== false && hasBase;
+  const lsdjMode = Boolean(options?.lsdjMode);
   const works =
-    'Works now: phrase notes/FX Chippy knows, pulse/wave/noise instrument panel fields, tempo, .sav open/export.';
+    'Works now: phrase notes/FX, the LSDJ hierarchy (sequence/chains/phrases/transpose), tables, grooves, pulse/wave/noise instrument panel fields, tempo, .sav open/export.';
   const mode = hasBase
     ? preserved
-      ? 'Round-trip: chain layout, tables, grooves, kits, speech, wave bank, and file slots from the opened .sav are preserved on re-export. Pulse/wave/noise panel edits merge into original instrument slots without wiping table/kit bits. Chippy still edits a flattened Song Order view.'
-      : 'Round-trip: opened .sav base is kept, but Song Order no longer fully aligns with the import map — chain slots that still map were patched; unmapped Chippy-only rows were not written into the hierarchy. Instrument panel merges still apply to mapped pulse/wave/noise slots.'
-    : 'Greenfield: new export builds synthetic chains from Song Order; no tables, grooves, kits, speech, or file slots.';
+      ? 'Round-trip: patch-in-place writes phrases, chains, sequence, tables, and grooves back into their original slots in the opened .sav. Kits, speech, wave bank softsynth, and file slots stay preserved.'
+      : 'Round-trip: opened .sav base is kept, but this song no longer carries an LSDJ hierarchy, so structure cannot be patched back.'
+    : lsdjMode
+      ? 'Greenfield: export writes the real chain hierarchy, tables, and grooves from LSDJ mode.'
+      : 'Greenfield: new export builds synthetic chains from Song Order.';
   const missing =
-    'Still missing for full editability: Chains UI, Tables (A), Grooves (G), Synth/wave editor (F), Kits, Speech, File slots /.lsdsng, and engine preview gaps for deferred cmds.';
+    'Still missing for full editability: Synth/wave editor (F), Kits, Speech, File slots /.lsdsng, and some engine preview gaps.';
   return `${works} ${mode} ${missing}`;
 }
 
@@ -663,7 +873,7 @@ function readInstruments(song: Uint8Array, warnings: string[]): InstrumentReadRe
     warnings.push('Kit instruments are not in Chippy yet; kit slots were imported as pulse.');
   }
   if (sawTable) {
-    warnings.push('Tables are not in Chippy yet; table links on instruments were ignored.');
+    warnings.push('Instrument table links were detected; edit tables in LSDJ mode (instrument panel).');
   }
   if (instruments.length === 0) {
     instruments.push(baseInstrument({ id: 'ins-1', name: 'Pulse', kind: 'pulse' }));
@@ -747,7 +957,7 @@ function groovesAreDefault(song: Uint8Array): boolean {
   if (song[OFF.grooves] !== 6 || song[OFF.grooves + 1] !== 6) {
     return false;
   }
-  for (let i = 2; i < 16 * 16; i += 1) {
+  for (let i = 2; i < MAX_GROOVES * GROOVE_LENGTH; i += 1) {
     if (song[OFF.grooves + i] !== 0) {
       return false;
     }
@@ -771,10 +981,13 @@ function fileSlotsLookUsed(sav: Uint8Array): boolean {
   return false;
 }
 
+function bitIsSet(table: Uint8Array, index: number): boolean {
+  return (table[index >> 3] & (1 << (index & 7))) !== 0;
+}
+
 /**
- * Flatten an LSDJ 128 KiB `.sav` work song into Chippy's Game Boy Song
- * (chains → unique patterns in Song Order). Unsupported structures become warnings.
- * Returns an importMap so re-export can patch phrase slots in place.
+ * Decode an LSDJ 128 KiB `.sav` into Chippy Song + LSDJ hierarchy.
+ * Phrases stay shared; transpose stays on chain steps (not baked into notes).
  */
 export function decodeLsdjSav(bytes: Uint8Array): LsdjDecodeResult {
   if (bytes.length !== LSDJ_SAV_SIZE) {
@@ -804,100 +1017,156 @@ export function decodeLsdjSav(bytes: Uint8Array): LsdjDecodeResult {
   }
 
   const { instruments, editableInstruments } = readInstruments(songBytes, warnings);
-  if (!groovesAreDefault(songBytes)) {
-    warnings.push('Grooves are not in Chippy yet; non-default grooves were ignored for editing (preserved on re-export).');
-  }
   if (fileSlotsLookUsed(bytes)) {
     warnings.push('File slots / .lsdsng projects in the upper 96KB are not editable in Chippy yet (preserved on re-export).');
   }
 
-  const channelPhrases = [0, 1, 2, 3].map((channel) => expandChannelPhrases(songBytes, channel));
-  const orderLength = Math.max(1, ...channelPhrases.map((list) => list.length));
-  const seenPhrases = new Set<number>();
-  let sharedPhrase = false;
-  let nonZeroTranspose = false;
   const unknownCmds = new Set<number>();
+  const phraseAlloc = songBytes.subarray(OFF.phraseAlloc, OFF.phraseAlloc + 32);
+  const chainAlloc = songBytes.subarray(OFF.chainAlloc, OFF.chainAlloc + 16);
 
-  const patterns: Pattern[] = [];
-  const order: string[] = [];
-  for (let index = 0; index < orderLength; index += 1) {
-    const id = `pat-${index + 1}`;
-    const pattern: Pattern = {
-      id,
-      name: `Pattern ${index + 1}`,
-      rows: Array.from({ length: PATTERN_ROWS }, () => Array.from({ length: 4 }, () => emptyCell())),
-    };
-    for (let channel = 0; channel < 4; channel += 1) {
-      const ref = channelPhrases[channel][index];
-      if (!ref) {
+  const phrases: LsdjPhrase[] = [];
+  const phraseSeen = new Set<number>();
+  const ensurePhrase = (phraseIndex: number): void => {
+    if (phraseIndex >= MAX_PHRASES || phraseSeen.has(phraseIndex)) {
+      return;
+    }
+    phraseSeen.add(phraseIndex);
+    phrases.push({
+      index: phraseIndex,
+      steps: readPhraseCells(songBytes, phraseIndex, 0, instruments, unknownCmds),
+    });
+  };
+
+  const chains: LsdjChain[] = [];
+  const chainSeen = new Set<number>();
+  const ensureChain = (chainIndex: number): void => {
+    if (chainIndex >= MAX_CHAINS || chainSeen.has(chainIndex)) {
+      return;
+    }
+    chainSeen.add(chainIndex);
+    const steps: LsdjChainStep[] = [];
+    for (let step = 0; step < CHAIN_LENGTH; step += 1) {
+      const phrase = songBytes[OFF.chainPhrases + chainIndex * CHAIN_LENGTH + step];
+      if (phrase === NO_PHRASE || phrase >= MAX_PHRASES) {
+        steps.push({ phrase: null, transpose: 0 });
         continue;
       }
-      if (seenPhrases.has(ref.phrase)) {
-        sharedPhrase = true;
-      }
-      seenPhrases.add(ref.phrase);
-      if (ref.transpose !== 0) {
-        nonZeroTranspose = true;
-      }
-      const cells = readPhraseCells(
-        songBytes,
-        ref.phrase,
-        ref.transpose,
-        instruments,
-        unknownCmds,
-      );
-      for (let row = 0; row < PHRASE_LENGTH; row += 1) {
-        pattern.rows[row][channel] = cells[row] ?? emptyCell();
-      }
+      ensurePhrase(phrase);
+      steps.push({
+        phrase,
+        transpose: signedByte(songBytes[OFF.chainTransposes + chainIndex * CHAIN_LENGTH + step]),
+      });
     }
-    patterns.push(pattern);
-    order.push(id);
+    chains.push({ index: chainIndex, steps });
+  };
+
+  for (let chainIndex = 0; chainIndex < MAX_CHAINS; chainIndex += 1) {
+    if (bitIsSet(chainAlloc, chainIndex)) {
+      ensureChain(chainIndex);
+    }
+  }
+  for (let phraseIndex = 0; phraseIndex < MAX_PHRASES; phraseIndex += 1) {
+    if (bitIsSet(phraseAlloc, phraseIndex)) {
+      ensurePhrase(phraseIndex);
+    }
   }
 
-  if (sharedPhrase) {
-    warnings.push(
-      'Shared phrases were expanded into unique patterns for editing; re-export patches the shared phrase slot (last mapped pattern wins).',
-    );
+  const sequence: (number | null)[][] = emptySequence();
+  for (let channel = 0; channel < 4; channel += 1) {
+    for (let row = 0; row < MAX_SEQUENCE_ROWS; row += 1) {
+      const chainIndex = songBytes[OFF.sequence + row * 4 + channel];
+      if (chainIndex === NO_CHAIN || chainIndex >= MAX_CHAINS) {
+        continue;
+      }
+      // The sequence may point at a chain LSDJ never marked allocated.
+      ensureChain(chainIndex);
+      sequence[channel][row] = chainIndex;
+    }
   }
-  if (nonZeroTranspose) {
-    warnings.push(
-      'Chain transpose was baked into notes for editing; re-export restores transpose via patch-in-place.',
-    );
+
+  phrases.sort((a, b) => a.index - b.index);
+  chains.sort((a, b) => a.index - b.index);
+  if (phrases.length === 0) {
+    phrases.push(blankLsdjPhrase(0));
   }
+  if (chains.length === 0) {
+    chains.push(blankLsdjChain(0));
+  }
+  const sequenceIsEmpty = !sequence.some((rows) => rows.some((value) => value !== null));
+  if (sequenceIsEmpty) {
+    for (let channel = 0; channel < 4; channel += 1) {
+      sequence[channel][0] = chains[0].index;
+    }
+  }
+
+  const tables = readTables(songBytes, formatVersion);
+  const allocatedTables = tables
+    .map((table) => table.index)
+    .filter((slot) => songBytes[OFF.tableAlloc + slot] === 1);
+
+  const grooves = readGrooves(songBytes);
+  if (!groovesAreDefault(songBytes)) {
+    warnings.push('Non-default grooves imported (editable in LSDJ mode).');
+  }
+
   if (unknownCmds.size > 0) {
     warnings.push(
       `Unknown phrase command byte(s) skipped: ${[...unknownCmds].map((b) => b.toString(16).padStart(2, '0')).join(', ')}.`,
     );
   }
-  warnings.push('Tables, kits, speech, and softsynth details are not editable in Chippy yet (preserved on re-export).');
+  warnings.push('Kits, speech, and softsynth details are not editable in Chippy yet (preserved on re-export).');
+  warnings.push('Opened in LSDJ mode — Song, Chain, and Phrase screens edit the real hierarchy.');
+
+  const hierarchy: LsdjHierarchy = {
+    enabled: true,
+    phrases,
+    chains,
+    sequence,
+    grooves,
+    tables,
+    activeGroove: 0,
+    focus: { songRow: 0, chainStep: 0 },
+  };
+
+  const projected = syncFlatProjection({
+    id: 'song-1',
+    name: 'LSDJ Import',
+    tempo: readTempo(songBytes),
+    order: [],
+    patterns: [],
+    lsdj: hierarchy,
+  });
 
   const uniqueWarnings = [...new Set(warnings)];
-
   const song: Song = {
     name: 'LSDJ Import',
     chip: 'gameboy',
-    tempo: readTempo(songBytes),
-    order,
-    patterns,
+    tempo: projected.tempo,
+    order: projected.order,
+    patterns: projected.patterns,
     instruments,
-    armedInstrumentId: instruments[0].id,
+    armedInstrumentId: instruments[0]?.id ?? 'ins-1',
   };
+
   return {
     song,
+    hierarchy: projected.lsdj!,
     warnings: uniqueWarnings,
     formatVersion,
-    importMap: { channelPhrases, editableInstruments },
+    importMap: { editableInstruments, allocatedTables },
   };
 }
 
-/** Wrap a decoded LSDJ song into a Chippy Project for session.load. */
+/** Wrap a decoded LSDJ song into a Chippy Project for session.load (LSDJ mode on). */
 export function projectFromLsdjDecode(result: LsdjDecodeResult, projectName = 'LSDJ Import'): Project {
-  const body = {
+  const body: SongBody = {
     id: 'song-1',
     name: result.song.name,
     tempo: result.song.tempo,
     order: result.song.order,
     patterns: result.song.patterns,
+    lsdj: result.hierarchy,
   };
   return {
     version: PROJECT_VERSION,
@@ -911,11 +1180,14 @@ export function projectFromLsdjDecode(result: LsdjDecodeResult, projectName = 'L
   };
 }
 
-/** True when Song Order length still aligns with the import map on every channel. */
-export function lsdjImportMapAligned(song: Song, importMap: LsdjImportMap | null | undefined): boolean {
-  if (!importMap) {
-    return false;
-  }
-  const orderLen = song.order.length;
-  return importMap.channelPhrases.every((refs) => refs.length === orderLen);
+/**
+ * True when the opened `.sav` can still be patched in place.
+ * The hierarchy carries its own LSDJ slot numbers, so structure is preserved as long as
+ * the song still has one.
+ */
+export function lsdjImportMapAligned(
+  importMap: LsdjImportMap | null | undefined,
+  hierarchy: LsdjHierarchy | null | undefined,
+): boolean {
+  return Boolean(importMap && hierarchy);
 }

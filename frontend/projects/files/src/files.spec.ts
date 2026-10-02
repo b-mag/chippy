@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { enterNote, newProject, newSession, randomSong, songForRender, updateInstrument } from '@chippy/domain';
+import { enableLsdjMode, enterNote, expandFlatToHierarchy, newProject, newSession, randomSong, songForRender, updateInstrument } from '@chippy/domain';
 import { renderSong, type AyFrame, type GbFrame } from '@chippy/engines';
 import {
   a4Hz,
@@ -125,20 +125,20 @@ describe('project file', () => {
       armedInstrumentId: project.armedInstrumentId,
     };
     const migrated = parseProject(JSON.stringify(legacy));
-    expect(migrated.version).toBe(4);
+    expect(migrated.version).toBe(6);
     expect(migrated.customPresets).toEqual([]);
     expect(migrated.songs[0].patterns[0].name).toBe('Pattern 1');
-    const v4 = parseProject(text);
-    expect(v4.version).toBe(4);
-    expect(v4.customPresets).toEqual([]);
+    const v6 = parseProject(text);
+    expect(v6.version).toBe(6);
+    expect(v6.customPresets).toEqual([]);
     const asV2 = JSON.parse(text);
     asV2.version = 2;
     delete asV2.customPresets;
     const fromV2 = parseProject(JSON.stringify(asV2));
-    expect(fromV2.version).toBe(4);
+    expect(fromV2.version).toBe(6);
     expect(fromV2.customPresets).toEqual([]);
     expect(parseProject(JSON.stringify({
-      ...v4,
+      ...v6,
       songs: [{ id: 'song-1', name: 'A', tempo: 100, order: ['pat-1'], patterns: [{ id: 'pat-1', rows: project.songs[0].patterns[0].rows }] }],
       activeSongId: 'missing',
     })).activeSongId).toBe('song-1');
@@ -158,12 +158,12 @@ describe('project file', () => {
       chip: 'gameboy',
       instruments: [],
       armedInstrumentId: 'ins-1',
-      songs: v4.songs,
-      activeSongId: v4.activeSongId,
+      songs: v6.songs,
+      activeSongId: v6.activeSongId,
       customPresets: [],
     }))).toThrow(/instruments/);
     const withCustom = {
-      ...v4,
+      ...v6,
       customPresets: [{
         id: 'custom-1',
         name: 'My lead',
@@ -174,6 +174,87 @@ describe('project file', () => {
       }],
     };
     expect(parseProject(JSON.stringify(withCustom)).customPresets[0].name).toBe('My lead');
+  });
+
+  it('serializes and reloads the LSDJ hierarchy on a Game Boy project', () => {
+    const project = newProject('gameboy');
+    const expanded = expandFlatToHierarchy(project.songs[0], 4);
+    expanded.lsdj!.grooves[0] = [5, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    expanded.lsdj!.tables[0].steps[0].envelope = 0xab;
+    expanded.lsdj!.phrases[0].steps[0] = {
+      note: 60, cut: false, instrumentId: 'ins-1', volume: null, effect: null,
+    };
+    expanded.lsdj!.sequence[0][7] = expanded.lsdj!.chains[0].index;
+    project.songs[0] = expanded;
+    const text = serializeProject(project);
+    const reloaded = parseProject(text);
+    expect(reloaded.version).toBe(6);
+    expect(reloaded.songs[0].lsdj?.enabled).toBe(true);
+    expect(reloaded.songs[0].lsdj?.grooves[0][0]).toBe(5);
+    expect(reloaded.songs[0].lsdj?.tables[0].steps[0].envelope).toBe(0xab);
+    expect(reloaded.songs[0].lsdj?.phrases[0].steps[0].note).toBe(60);
+    expect(reloaded.songs[0].lsdj?.sequence[0][7]).toBe(expanded.lsdj!.chains[0].index);
+    expect(reloaded.songs[0].lsdj?.chains.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('migrates a v5 string-keyed hierarchy into per-channel phrase slots', () => {
+    const project = newProject('gameboy');
+    const v5 = {
+      version: 5,
+      name: 'Old',
+      chip: 'gameboy',
+      instruments: project.instruments,
+      armedInstrumentId: project.armedInstrumentId,
+      activeSongId: 'song-1',
+      customPresets: [],
+      songs: [{
+        id: 'song-1',
+        name: 'A',
+        tempo: 120,
+        order: ['phr-1'],
+        patterns: [{ id: 'phr-1', name: 'Phrase 1', rows: project.songs[0].patterns[0].rows }],
+        lsdj: {
+          enabled: true,
+          view: 'expanded',
+          activeGroove: 0,
+          focusChainId: 'chn-1',
+          focusChannel: 0,
+          grooves: [[5, 7]],
+          tables: [{ id: 'tbl-1', name: 'Table 1', steps: [{ envelope: 0x22 }] }],
+          phrases: [{
+            id: 'phr-1',
+            name: 'Phrase 1',
+            rows: project.songs[0].patterns[0].rows.map((row, index) =>
+              row.map((cell, channel) =>
+                index === 0 && channel === 1
+                  ? { note: 55, cut: false, instrumentId: 'ins-1', volume: null, effect: null }
+                  : cell,
+              ),
+            ),
+          }],
+          chains: [{
+            id: 'chn-1',
+            name: 'Chain 1',
+            steps: [{ phraseId: 'phr-1', transpose: 4 }],
+          }],
+          sequence: [['chn-1'], ['chn-1'], [], []],
+        },
+      }],
+    };
+    const migrated = parseProject(JSON.stringify(v5));
+    expect(migrated.version).toBe(6);
+    const hierarchy = migrated.songs[0].lsdj!;
+    // One chain per (chain, channel) pair that the sequence actually used.
+    expect(hierarchy.chains.length).toBe(2);
+    expect(hierarchy.sequence[0][0]).toBe(0);
+    expect(hierarchy.sequence[1][0]).toBe(1);
+    expect(hierarchy.sequence[2][0]).toBeNull();
+    // Channel 1's copy of the phrase keeps the note that only existed in that column.
+    const channelOnePhrase = hierarchy.chains[1].steps[0].phrase!;
+    expect(hierarchy.phrases.find((item) => item.index === channelOnePhrase)?.steps[0].note).toBe(55);
+    expect(hierarchy.chains[0].steps[0].transpose).toBe(4);
+    expect(hierarchy.grooves[0][0]).toBe(5);
+    expect(hierarchy.tables[0].steps[0].envelope).toBe(0x22);
   });
 });
 
@@ -258,6 +339,24 @@ describe('export helpers', () => {
     expect(() => exportLsdjSav(songForRender(newSession('vectrex').project))).toThrow(/Game Boy/);
   });
 
+  it('greenfield LSDJ hierarchy export round-trips', () => {
+    const state = enableLsdjMode(enterNote(newSession('gameboy'), 60));
+    const song = songForRender(state.project);
+    const hierarchy = state.project.songs[0].lsdj!;
+    hierarchy.grooves[0] = [5, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    hierarchy.tables[0].steps[0].envelope = 0x12;
+    const bytes = encodeLsdjSav(song, { hierarchy, modified: true });
+    expect(bytes.length).toBe(LSDJ_SAV_SIZE);
+    expect(bytes[0x1090]).toBe(5);
+    expect(bytes[0x1091]).toBe(7);
+    const decoded = decodeLsdjSav(bytes);
+    expect(decoded.hierarchy.enabled).toBe(true);
+    expect(decoded.hierarchy.grooves[0][0]).toBe(5);
+    expect(decoded.song.patterns.some((pattern) =>
+      pattern.rows.some((row) => row.some((cell) => cell.note === 60)),
+    )).toBe(true);
+  });
+
   it('round-trips a game boy song through LSDJ .sav encode/decode', () => {
     const state = enterNote(newSession('gameboy'), 60);
     const song = songForRender(state.project);
@@ -273,11 +372,12 @@ describe('export helpers', () => {
     expect(decoded.song.order.length).toBeGreaterThanOrEqual(1);
     expect(decoded.song.patterns[0].rows[0][0].note).toBe(60);
     expect(decoded.song.patterns[0].rows[0][0].effect).toEqual({ cmd: 'C', value: 0x37 });
-    expect(decoded.warnings.some((warning) => /tables|kits|speech/i.test(warning))).toBe(true);
+    expect(decoded.warnings.some((warning) => /kits|speech|LSDJ mode/i.test(warning))).toBe(true);
     const project = projectFromLsdjDecode(decoded, 'cart');
     expect(project.chip).toBe('gameboy');
     expect(project.name).toBe('cart');
     expect(project.songs[0].tempo).toBe(145);
+    expect(project.songs[0].lsdj?.enabled).toBe(true);
   });
 
   it('decodes an empty LSDJ .sav work song into a blank game boy project', () => {
@@ -303,7 +403,8 @@ describe('export helpers', () => {
     expect(decoded.song.instruments.length).toBeGreaterThanOrEqual(1);
     expect(decoded.warnings.length).toBeGreaterThan(0);
     expect(decoded.formatVersion).toBe(LSDJ_GREENFIELD_FORMAT_VERSION);
-    expect(decoded.importMap.channelPhrases).toHaveLength(4);
+    expect(decoded.hierarchy.phrases.length).toBeGreaterThan(0);
+    expect(decoded.hierarchy.chains.length).toBeGreaterThan(0);
   });
 
   it('no-edit re-export of an opened .sav is byte-identical (identity invariant)', () => {
@@ -321,10 +422,15 @@ describe('export helpers', () => {
   it('patch-in-place preserves chains/grooves/tables/file slots when editing', () => {
     const original = dirtyLsdjSavFixture();
     const decoded = decodeLsdjSav(original);
-    expect(decoded.song.patterns[0].rows[0][0].note).toBe(72); // 60 + transpose 12
-    decoded.song.patterns[0].rows[0][0] = {
-      ...decoded.song.patterns[0].rows[0][0],
-      note: 64,
+    // Transpose stays on the chain step; the phrase keeps its own pre-transpose pitch.
+    expect(decoded.hierarchy.phrases[0]?.steps[0]?.note).toBe(60);
+    expect(decoded.hierarchy.chains[0]?.steps[0]?.transpose).toBe(12);
+    // The flat projection hears it transposed.
+    expect(decoded.song.patterns[0].rows[0][0].note).toBe(72);
+
+    decoded.hierarchy.phrases[0].steps[0] = {
+      ...decoded.hierarchy.phrases[0].steps[0],
+      note: 52,
       effect: { cmd: 'C', value: 0x11 },
     };
     decoded.song.tempo = 160;
@@ -332,12 +438,9 @@ describe('export helpers', () => {
       baseSav: original,
       importMap: decoded.importMap,
       modified: true,
+      hierarchy: decoded.hierarchy,
     });
     expect(exported).not.toEqual(original);
-    // Structure + unsupported regions unchanged
-    expect(sliceEqual(exported, original, 0x1290, 1024)).toBe(true); // sequence
-    expect(sliceEqual(exported, original, 0x2080, 0x800)).toBe(true); // chain phrases
-    expect(sliceEqual(exported, original, 0x2880, 0x800)).toBe(true); // chain transposes
     expect(sliceEqual(exported, original, 0x3e82, 32)).toBe(true); // phrase alloc
     expect(sliceEqual(exported, original, 0x3ea2, 16)).toBe(true); // chain alloc
     expect(exported[0x1090]).toBe(5);
@@ -345,12 +448,15 @@ describe('export helpers', () => {
     expect(exported[0x1690]).toBe(0xab);
     expect(exported[0x7fff]).toBe(9);
     expect(exported[0x8000]).toBe(0x41);
-    // Phrase note stored without transpose: 64 - 12 = 52
+    // Phrases are written at their own slot, so no transpose arithmetic on the way out.
     expect(exported[0x0000]).toBe(52);
     expect(exported[0x4000]).toBe(2); // C
     expect(exported[0x4ff0]).toBe(0x11);
     expect(exported[0x3fb4]).toBe(160);
-    expect(lsdjImportMapAligned(decoded.song, decoded.importMap)).toBe(true);
+    // Chain transpose byte is untouched by a phrase edit.
+    expect(exported[0x2880]).toBe(12);
+    expect(lsdjImportMapAligned(decoded.importMap, decoded.hierarchy)).toBe(true);
+    expect(lsdjImportMapAligned(decoded.importMap, null)).toBe(false);
   });
 
   it('patch-in-place merges pulse instrument panel fields without wiping table/kit bits', () => {
@@ -471,10 +577,11 @@ describe('export helpers', () => {
     const opened = lsdjSavCompatibilityStatus({
       baseSav: dirtyLsdjSavFixture(),
       structurePreserved: true,
+      lsdjMode: true,
     });
     expect(opened).toMatch(/Round-trip/i);
     expect(opened).toMatch(/preserved/i);
-    expect(opened).toMatch(/Chains UI/i);
+    expect(lsdjSavCompatibilityStatus({ baseSav: null, lsdjMode: true })).toMatch(/LSDJ mode/i);
   });
 
   it('exports ym and aky for vectrex', () => {

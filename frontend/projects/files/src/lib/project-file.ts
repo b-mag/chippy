@@ -1,14 +1,25 @@
 import {
   LEGACY_PROJECT_VERSION,
+  LSDJ_MAX_CHAINS,
+  LSDJ_MAX_PHRASES,
+  LSDJ_TABLE_COUNT,
   PROJECT_VERSION,
   PROJECT_VERSION_V2,
   PROJECT_VERSION_V3,
+  PROJECT_VERSION_V4,
+  PROJECT_VERSION_V5,
   baseInstrument,
+  blankLsdjTable,
+  blankTableStep,
+  defaultGrooves,
   defaultRoleForKind,
   effectCmdsForChip,
   effectValueMax,
+  emptySequence,
   isEffectCmdForChip,
+  padChainSteps,
   remapLegacySharedEffectForGameboy,
+  syncFlatProjection,
   type Cell,
   type CellEffect,
   type ChipId,
@@ -17,6 +28,12 @@ import {
   type Instrument,
   type InstrumentKind,
   type InstrumentPatch,
+  type LsdjChain,
+  type LsdjChainStep,
+  type LsdjHierarchy,
+  type LsdjPhrase,
+  type LsdjTable,
+  type LsdjTableStep,
   type Pattern,
   type PresetRole,
   type Project,
@@ -141,12 +158,286 @@ function normalizeSongBody(
   if (!Array.isArray(patterns) || patterns.length === 0) {
     reject('A song has no patterns.');
   }
-  return {
+  const body: SongBody = {
     id,
     name,
     tempo,
     order: order as string[],
     patterns: normalizePatterns(patterns as Pattern[], chip, legacySharedGb),
+    lsdj: chip === 'gameboy' ? normalizeLsdjHierarchy(raw['lsdj'], chip, legacySharedGb) : null,
+  };
+  // The hierarchy is canonical, so order/patterns are rebuilt rather than trusted.
+  return body.lsdj ? syncFlatProjection(body) : body;
+}
+
+function slotOrNull(raw: unknown, limit: number): number | null {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+    return null;
+  }
+  const value = Math.round(raw);
+  return value >= 0 && value < limit ? value : null;
+}
+
+function normalizeChainStep(raw: unknown): LsdjChainStep {
+  if (!isRecord(raw)) {
+    return { phrase: null, transpose: 0 };
+  }
+  return {
+    phrase: slotOrNull(raw['phrase'], LSDJ_MAX_PHRASES),
+    transpose: typeof raw['transpose'] === 'number'
+      ? Math.max(-128, Math.min(127, Math.round(raw['transpose'])))
+      : 0,
+  };
+}
+
+function normalizeChain(raw: unknown, index: number): LsdjChain | null {
+  if (!isRecord(raw)) {
+    return null;
+  }
+  const slot = slotOrNull(raw['index'], LSDJ_MAX_CHAINS) ?? (index < LSDJ_MAX_CHAINS ? index : null);
+  if (slot === null) {
+    return null;
+  }
+  const stepsRaw = Array.isArray(raw['steps']) ? raw['steps'] : [];
+  return {
+    index: slot,
+    steps: padChainSteps(Array.from({ length: 16 }, (_, i) => normalizeChainStep(stepsRaw[i]))),
+  };
+}
+
+function normalizePhrase(
+  raw: unknown,
+  index: number,
+  chip: ChipId,
+  legacySharedGb: boolean,
+): LsdjPhrase | null {
+  if (!isRecord(raw)) {
+    return null;
+  }
+  const slot = slotOrNull(raw['index'], LSDJ_MAX_PHRASES) ?? (index < LSDJ_MAX_PHRASES ? index : null);
+  if (slot === null) {
+    return null;
+  }
+  const stepsRaw = Array.isArray(raw['steps']) ? raw['steps'] : [];
+  return {
+    index: slot,
+    steps: Array.from({ length: 16 }, (_, i) => normalizeCell(stepsRaw[i], chip, legacySharedGb)),
+  };
+}
+
+function normalizeTableStep(raw: unknown, chip: ChipId, legacySharedGb: boolean): LsdjTableStep {
+  if (!isRecord(raw)) {
+    return blankTableStep();
+  }
+  const cmd1Raw = typeof raw['cmd1'] === 'string'
+    ? normalizeEffect({ cmd: raw['cmd1'], value: typeof raw['cmd1Value'] === 'number' ? raw['cmd1Value'] : 0 }, chip, legacySharedGb)
+    : null;
+  const cmd2Raw = typeof raw['cmd2'] === 'string'
+    ? normalizeEffect({ cmd: raw['cmd2'], value: typeof raw['cmd2Value'] === 'number' ? raw['cmd2Value'] : 0 }, chip, legacySharedGb)
+    : null;
+  return {
+    envelope: typeof raw['envelope'] === 'number' ? raw['envelope'] & 0xff : 0,
+    transpose: typeof raw['transpose'] === 'number' ? raw['transpose'] & 0xff : 0,
+    cmd1: cmd1Raw?.cmd ?? null,
+    cmd1Value: cmd1Raw?.value ?? 0,
+    cmd2: cmd2Raw?.cmd ?? null,
+    cmd2Value: cmd2Raw?.value ?? 0,
+  };
+}
+
+function normalizeTable(raw: unknown, index: number, chip: ChipId, legacySharedGb: boolean): LsdjTable | null {
+  if (!isRecord(raw)) {
+    return null;
+  }
+  const slot = slotOrNull(raw['index'], LSDJ_TABLE_COUNT) ?? (index < LSDJ_TABLE_COUNT ? index : null);
+  if (slot === null) {
+    return null;
+  }
+  const stepsRaw = Array.isArray(raw['steps']) ? raw['steps'] : [];
+  return {
+    index: slot,
+    steps: Array.from({ length: 16 }, (_, i) => normalizeTableStep(stepsRaw[i], chip, legacySharedGb)),
+  };
+}
+
+function normalizeGrooves(raw: unknown): number[][] {
+  const groovesRaw = Array.isArray(raw) ? raw : [];
+  return defaultGrooves().map((fallback, g) => {
+    const steps = groovesRaw[g];
+    if (!Array.isArray(steps)) {
+      return fallback;
+    }
+    return Array.from({ length: 16 }, (_, i) =>
+      typeof steps[i] === 'number' ? Math.max(0, Math.min(15, Math.round(steps[i] as number))) : 0,
+    );
+  });
+}
+
+/**
+ * v5 stored phrases as 4-channel-wide patterns keyed by string id, which collided when one
+ * phrase ran on several channels. Rebuild it as LSDJ does: one single-channel phrase per
+ * (phrase, channel) pair actually used by the sequence, deduplicated per channel.
+ */
+function migrateV5Hierarchy(
+  raw: Record<string, unknown>,
+  chip: ChipId,
+  legacySharedGb: boolean,
+): LsdjHierarchy | null {
+  const legacyPhrases = Array.isArray(raw['phrases'])
+    ? normalizePatterns(raw['phrases'] as Pattern[], chip, legacySharedGb)
+    : [];
+  const legacyChains = Array.isArray(raw['chains']) ? (raw['chains'] as unknown[]) : [];
+  const sequenceRaw = Array.isArray(raw['sequence']) ? raw['sequence'] : [];
+
+  const phrases: LsdjPhrase[] = [];
+  const chains: LsdjChain[] = [];
+  const sequence = emptySequence();
+  const chainByKey = new Map<string, number>();
+  const phraseByKey = new Map<string, number>();
+  let nextPhrase = 0;
+  let nextChain = 0;
+
+  for (let channel = 0; channel < 4; channel += 1) {
+    const rows = Array.isArray(sequenceRaw[channel]) ? (sequenceRaw[channel] as unknown[]) : [];
+    let songRow = 0;
+    for (const chainIdRaw of rows) {
+      if (typeof chainIdRaw !== 'string' || songRow >= 256) {
+        continue;
+      }
+      const key = `${chainIdRaw}:${channel}`;
+      let slot = chainByKey.get(key);
+      if (slot === undefined) {
+        if (nextChain >= LSDJ_MAX_CHAINS) {
+          break;
+        }
+        const legacyChain = legacyChains.find(
+          (item) => isRecord(item) && item['id'] === chainIdRaw,
+        );
+        const legacySteps = isRecord(legacyChain) && Array.isArray(legacyChain['steps'])
+          ? (legacyChain['steps'] as unknown[])
+          : [];
+        const steps: LsdjChainStep[] = [];
+        for (let i = 0; i < 16; i += 1) {
+          const step = legacySteps[i];
+          const phraseId = isRecord(step) && typeof step['phraseId'] === 'string'
+            ? String(step['phraseId'])
+            : null;
+          const transpose = isRecord(step) && typeof step['transpose'] === 'number'
+            ? Math.max(-128, Math.min(127, Math.round(step['transpose'])))
+            : 0;
+          if (!phraseId) {
+            steps.push({ phrase: null, transpose: 0 });
+            continue;
+          }
+          const phraseKey = `${phraseId}:${channel}`;
+          let phraseSlot = phraseByKey.get(phraseKey);
+          if (phraseSlot === undefined) {
+            if (nextPhrase >= LSDJ_MAX_PHRASES) {
+              steps.push({ phrase: null, transpose: 0 });
+              continue;
+            }
+            const legacy = legacyPhrases.find((item) => item.id === phraseId);
+            phraseSlot = nextPhrase;
+            phrases.push({
+              index: phraseSlot,
+              steps: Array.from({ length: 16 }, (_, row) =>
+                normalizeCell(legacy?.rows?.[row]?.[channel], chip, legacySharedGb),
+              ),
+            });
+            phraseByKey.set(phraseKey, phraseSlot);
+            nextPhrase += 1;
+          }
+          steps.push({ phrase: phraseSlot, transpose });
+        }
+        slot = nextChain;
+        chains.push({ index: slot, steps: padChainSteps(steps) });
+        chainByKey.set(key, slot);
+        nextChain += 1;
+      }
+      sequence[channel][songRow] = slot;
+      songRow += 1;
+    }
+  }
+
+  if (phrases.length === 0 || chains.length === 0) {
+    return null;
+  }
+
+  const tables = Array.isArray(raw['tables'])
+    ? (raw['tables'] as unknown[])
+      .map((item, index) => normalizeTable(item, index, chip, legacySharedGb))
+      .filter((item): item is LsdjTable => item !== null)
+    : [blankLsdjTable(0)];
+
+  return {
+    enabled: Boolean(raw['enabled']),
+    phrases,
+    chains,
+    sequence,
+    grooves: normalizeGrooves(raw['grooves']),
+    tables: tables.length > 0 ? tables : [blankLsdjTable(0)],
+    activeGroove: typeof raw['activeGroove'] === 'number'
+      ? Math.max(0, Math.min(30, Math.round(raw['activeGroove'])))
+      : 0,
+    focus: { songRow: 0, chainStep: 0 },
+  };
+}
+
+function normalizeLsdjHierarchy(
+  raw: unknown,
+  chip: ChipId,
+  legacySharedGb: boolean,
+): LsdjHierarchy | null {
+  if (!isRecord(raw)) {
+    return null;
+  }
+  if ('view' in raw || 'focusChainId' in raw) {
+    return migrateV5Hierarchy(raw, chip, legacySharedGb);
+  }
+  const phrases = Array.isArray(raw['phrases'])
+    ? (raw['phrases'] as unknown[])
+      .map((item, index) => normalizePhrase(item, index, chip, legacySharedGb))
+      .filter((item): item is LsdjPhrase => item !== null)
+    : [];
+  const chains = Array.isArray(raw['chains'])
+    ? (raw['chains'] as unknown[])
+      .map((item, index) => normalizeChain(item, index))
+      .filter((item): item is LsdjChain => item !== null)
+    : [];
+  if (phrases.length === 0 || chains.length === 0) {
+    return null;
+  }
+  const sequenceRaw = Array.isArray(raw['sequence']) ? raw['sequence'] : [];
+  const sequence = emptySequence();
+  for (let channel = 0; channel < 4; channel += 1) {
+    const rows = sequenceRaw[channel];
+    if (!Array.isArray(rows)) {
+      continue;
+    }
+    for (let row = 0; row < Math.min(rows.length, 256); row += 1) {
+      sequence[channel][row] = slotOrNull(rows[row], LSDJ_MAX_CHAINS);
+    }
+  }
+  const tables = Array.isArray(raw['tables'])
+    ? (raw['tables'] as unknown[])
+      .map((item, index) => normalizeTable(item, index, chip, legacySharedGb))
+      .filter((item): item is LsdjTable => item !== null)
+    : [];
+  const focusRaw = isRecord(raw['focus']) ? raw['focus'] : {};
+  return {
+    enabled: Boolean(raw['enabled']),
+    phrases: [...phrases].sort((a, b) => a.index - b.index),
+    chains: [...chains].sort((a, b) => a.index - b.index),
+    sequence,
+    grooves: normalizeGrooves(raw['grooves']),
+    tables: tables.length > 0 ? tables.sort((a, b) => a.index - b.index) : [blankLsdjTable(0)],
+    activeGroove: typeof raw['activeGroove'] === 'number'
+      ? Math.max(0, Math.min(30, Math.round(raw['activeGroove'])))
+      : 0,
+    focus: {
+      songRow: slotOrNull(focusRaw['songRow'], 256) ?? 0,
+      chainStep: slotOrNull(focusRaw['chainStep'], 16) ?? 0,
+    },
   };
 }
 
@@ -208,6 +499,7 @@ function migrateV1(parsed: Record<string, unknown>): Project {
     tempo: typeof parsed['tempo'] === 'number' ? parsed['tempo'] : 120,
     order: parsed['order'] as string[],
     patterns: normalizePatterns(parsed['patterns'] as Pattern[], chip, legacySharedGb),
+    lsdj: null,
   };
   return {
     version: PROJECT_VERSION,
@@ -297,6 +589,9 @@ export function parseProject(raw: string): Project {
   }
   if (version === PROJECT_VERSION_V3) {
     return parseProjectBody(parsed, true, true);
+  }
+  if (version === PROJECT_VERSION_V4 || version === PROJECT_VERSION_V5) {
+    return parseProjectBody(parsed, true, false);
   }
   if (version !== PROJECT_VERSION) {
     reject('Unsupported project version.');

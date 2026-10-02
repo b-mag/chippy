@@ -2,15 +2,21 @@
 export const PATTERN_ROWS = 16;
 
 /** Version of the `.chippy.json` document. Unknown versions are rejected. */
-export const PROJECT_VERSION = 4;
+export const PROJECT_VERSION = 6;
 
-/** v3 projects (customPresets) still accepted on open and migrated to v4. */
+/** v5 projects (string-keyed LSDJ hierarchy) still accepted on open and migrated to v6. */
+export const PROJECT_VERSION_V5 = 5;
+
+/** v4 projects (pre–LSDJ mode) still accepted on open and migrated to v6. */
+export const PROJECT_VERSION_V4 = 4;
+
+/** v3 projects (customPresets) still accepted on open and migrated to v6. */
 export const PROJECT_VERSION_V3 = 3;
 
-/** Flat multi-song project version still accepted on open and migrated to v4. */
+/** Flat multi-song project version still accepted on open and migrated to v6. */
 export const PROJECT_VERSION_V2 = 2;
 
-/** Legacy flat-document version still accepted on open and migrated to v4. */
+/** Legacy flat-document version still accepted on open and migrated to v6. */
 export const LEGACY_PROJECT_VERSION = 1;
 
 /** Musical role used to group presets in the instrument studio. */
@@ -217,6 +223,11 @@ export interface SongBody {
   tempo: number;
   order: string[];
   patterns: Pattern[];
+  /**
+   * Game Boy LSDJ hierarchy. Absent for flat Chippy songs. Once present it is canonical:
+   * phrases/chains/sequence drive `order` / `patterns`, which become a derived projection.
+   */
+  lsdj?: import('./lsdj-hierarchy').LsdjHierarchy | null;
 }
 
 /**

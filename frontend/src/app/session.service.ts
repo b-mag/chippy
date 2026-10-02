@@ -8,17 +8,24 @@ import {
   addRandomPattern,
   addSnipInstrument,
   addSong,
+  addChainAt,
+  addPhraseAt,
+  addTable,
   armInstrument,
   changeInstrumentKind,
   clearCell,
   clearPattern,
   deleteInstrument,
+  disableLsdjMode,
   duplicatePattern,
+  enableLsdjMode,
   enterCut,
   enterNote,
   followPlaybackOrder,
   clearLsdjOverlay,
+  focusHierarchy,
   loadProject,
+  lsdjModeAvailability,
   markClean,
   moveCursor,
   newProjectForChip,
@@ -33,8 +40,10 @@ import {
   reorderOrder,
   importCustomPreset,
   saveCustomPreset,
+  selectChainStep,
   selectOrder,
   selectSong,
+  selectSongCell,
   setName,
   setOctave,
   setSongName,
@@ -43,8 +52,13 @@ import {
   setEffect,
   setCellInstrument,
   songForRender,
+  toggleLsdjMode,
   undo,
   updateInstrument,
+  writeChainStep,
+  writeGroove,
+  writeSongCell,
+  writeTable,
   type ChipId,
   type ColumnId,
   type CellEffect,
@@ -53,7 +67,9 @@ import {
   type CustomInstrumentPreset,
   type InstrumentPreset,
   type PresetRole,
+  type LsdjFocus,
   type LsdjImportMap,
+  type LsdjTable,
   type Project,
   type SessionState,
   type Song,
@@ -248,6 +264,66 @@ export class SessionService {
 
   lsdjImportMap(): LsdjImportMap | null {
     return this.state().lsdjImportMap;
+  }
+
+  lsdjModeAvailable(): { ok: true } | { ok: false; reason: string } {
+    return lsdjModeAvailability(this.state());
+  }
+
+  toggleLsdjMode(): void {
+    this.state.update((state) => toggleLsdjMode(state));
+  }
+
+  enableLsdjMode(): void {
+    this.state.update((state) => enableLsdjMode(state));
+  }
+
+  disableLsdjMode(): void {
+    this.state.update((state) => disableLsdjMode(state));
+  }
+
+  focusHierarchy(patch: Partial<LsdjFocus>): void {
+    this.state.update((state) => focusHierarchy(state, patch));
+  }
+
+  selectSongCell(channel: number, songRow: number): void {
+    this.state.update((state) => selectSongCell(state, channel, songRow));
+  }
+
+  selectChainStep(step: number): void {
+    this.state.update((state) => selectChainStep(state, step));
+  }
+
+  writeSongCell(channel: number, songRow: number, chain: number | null): void {
+    this.state.update((state) => writeSongCell(state, channel, songRow, chain));
+  }
+
+  addChainAt(channel: number, songRow: number): void {
+    this.state.update((state) => addChainAt(state, channel, songRow));
+  }
+
+  writeChainStep(
+    chainIndex: number,
+    step: number,
+    patch: { phrase?: number | null; transpose?: number },
+  ): void {
+    this.state.update((state) => writeChainStep(state, chainIndex, step, patch));
+  }
+
+  addPhraseAt(chainIndex: number, step: number): void {
+    this.state.update((state) => addPhraseAt(state, chainIndex, step));
+  }
+
+  writeGroove(grooveIndex: number, steps: number[]): void {
+    this.state.update((state) => writeGroove(state, grooveIndex, steps));
+  }
+
+  writeTable(table: LsdjTable): void {
+    this.state.update((state) => writeTable(state, table));
+  }
+
+  addTable(): void {
+    this.state.update((state) => addTable(state));
   }
 
   markClean(): void {
