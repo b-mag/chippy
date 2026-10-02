@@ -1,5 +1,5 @@
 import type { ChipId, EffectCmd } from './types';
-import { effectCmdsForChip, LSDJ_EFFECT_CMDS, SHARED_EFFECT_CMDS } from './types';
+import { effectCmdsForChip } from './types';
 
 /** Short reference entry for an FX command on a chip. */
 export interface EffectHelp {
@@ -10,7 +10,12 @@ export interface EffectHelp {
   previewNote?: string;
 }
 
-const SHARED_EFFECT_HELP: Record<(typeof SHARED_EFFECT_CMDS)[number], EffectHelp> = {
+/** SHARED_EFFECT_CMDS is typed EffectCmd[], so key the maps by explicit subsets. */
+type SharedEffectCmd = 'A' | 'U' | 'D' | 'R' | 'C' | 'P';
+type LsdjEffectCmd =
+  | 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'K' | 'L' | 'M' | 'O' | 'P' | 'R' | 'S' | 'T' | 'V' | 'W' | 'Z';
+
+const SHARED_EFFECT_HELP: Record<SharedEffectCmd, EffectHelp> = {
   A: { cmd: 'A', name: 'Vol down', summary: 'Volume slide down by value each frame (0–F).' },
   U: { cmd: 'U', name: 'Vol up', summary: 'Volume slide up by value each frame (0–F).' },
   D: { cmd: 'D', name: 'Delay', summary: 'Delay note onset by value frames into the row (0–F).' },
@@ -21,7 +26,7 @@ const SHARED_EFFECT_HELP: Record<(typeof SHARED_EFFECT_CMDS)[number], EffectHelp
 
 const LSDJ_PREVIEW_DEFERRED = 'Exports to .sav; live preview is approximate or silent until tables/grooves/synth land.';
 
-const LSDJ_EFFECT_HELP: Record<(typeof LSDJ_EFFECT_CMDS)[number], EffectHelp> = {
+const LSDJ_EFFECT_HELP: Record<LsdjEffectCmd, EffectHelp> = {
   A: {
     cmd: 'A',
     name: 'Table',
@@ -70,9 +75,9 @@ const LSDJ_EFFECT_HELP: Record<(typeof LSDJ_EFFECT_CMDS)[number], EffectHelp> = 
 
 export function effectHelp(cmd: EffectCmd, chip: ChipId): EffectHelp | null {
   if (chip === 'gameboy') {
-    return LSDJ_EFFECT_HELP[cmd as (typeof LSDJ_EFFECT_CMDS)[number]] ?? null;
+    return (LSDJ_EFFECT_HELP as Partial<Record<EffectCmd, EffectHelp>>)[cmd] ?? null;
   }
-  return SHARED_EFFECT_HELP[cmd as (typeof SHARED_EFFECT_CMDS)[number]] ?? null;
+  return (SHARED_EFFECT_HELP as Partial<Record<EffectCmd, EffectHelp>>)[cmd] ?? null;
 }
 
 /** Ordered reference list for the active chip’s FX set. */
