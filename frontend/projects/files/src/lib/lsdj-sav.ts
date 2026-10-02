@@ -148,18 +148,28 @@ function envelopeByte(instrument: Instrument): number {
   return ((start & 0x0f) << 4) | (direction << 3) | period;
 }
 
+function pulseSweepByte(instrument: Instrument): number {
+  const sweepTime = instrument.sweepTime & 7;
+  const sweepShift = instrument.sweepShift & 7;
+  const sweepNeg = instrument.sweepDown ? 1 : 0;
+  return sweepTime === 0 && sweepShift === 0
+    ? 0xff
+    : ((sweepTime & 7) << 4) | (sweepNeg << 3) | (sweepShift & 7);
+}
+
+function waveVolumeByte(instrument: Instrument): number {
+  const vol = Math.min(15, Math.max(0, instrument.envelopeStart | 0));
+  // Wave volume: 0%, 25%, 50%, 100% in bits 6-5.
+  return vol >= 12 ? 0x60 : vol >= 6 ? 0x40 : vol > 0 ? 0x20 : 0x00;
+}
+
 function writePulseInstrument(dest: Uint8Array, instrument: Instrument): void {
   dest.fill(0);
   dest[0] = 0; // pulse
   dest[1] = envelopeByte(instrument);
   dest[2] = 0;
   dest[3] = 0; // unlimited length
-  const sweepTime = instrument.sweepTime & 7;
-  const sweepShift = instrument.sweepShift & 7;
-  const sweepNeg = instrument.sweepDown ? 1 : 0;
-  dest[4] = sweepTime === 0 && sweepShift === 0
-    ? 0xff
-    : ((sweepTime & 7) << 4) | (sweepNeg << 3) | (sweepShift & 7);
+  dest[4] = pulseSweepByte(instrument);
   dest[5] = 0;
   dest[6] = 0; // table off
   dest[7] = ((instrument.duty & 3) << 6) | 0x03; // duty + LR
@@ -172,10 +182,7 @@ function writePulseInstrument(dest: Uint8Array, instrument: Instrument): void {
 function writeWaveInstrument(dest: Uint8Array, instrument: Instrument): void {
   dest.fill(0);
   dest[0] = 1;
-  const vol = Math.min(15, Math.max(0, instrument.envelopeStart | 0));
-  // Wave volume: 0%, 25%, 50%, 100% encoded in bits 6-5 roughly as E values.
-  const waveVol = vol >= 12 ? 0x60 : vol >= 6 ? 0x40 : vol > 0 ? 0x20 : 0x00;
-  dest[1] = waveVol;
+  dest[1] = waveVolumeByte(instrument);
   dest[2] = 0;
   dest[3] = (instrument.waveform & 0x0f); // wave frame in synth 0
   dest[5] = 0;
@@ -197,6 +204,29 @@ function writeNoiseInstrument(dest: Uint8Array, instrument: Instrument): void {
   dest[7] = 0x03;
 }
 
+/**
+ * Patch Chippy-owned pulse/wave/noise fields into an existing 16-byte slot.
+ * Leaves table link, vibrato/pitch flags, length, panning, finetune, kit bits, etc.
+ */
+function mergeInstrumentFields(dest: Uint8Array, instrument: Instrument): void {
+  if (instrument.kind === 'wave') {
+    dest[0] = 1;
+    dest[1] = (dest[1] & ~0x60) | waveVolumeByte(instrument);
+    dest[3] = (dest[3] & 0xf0) | (instrument.waveform & 0x0f);
+    return;
+  }
+  if (instrument.kind === 'noise') {
+    dest[0] = 3;
+    dest[1] = envelopeByte(instrument);
+    dest[2] = (dest[2] & ~0x01) | (instrument.noiseShort ? 1 : 0);
+    return;
+  }
+  dest[0] = 0;
+  dest[1] = envelopeByte(instrument);
+  dest[4] = pulseSweepByte(instrument);
+  dest[7] = (dest[7] & 0x3f) | ((instrument.duty & 3) << 6);
+}
+
 function writeInstrument(song: Uint8Array, index: number, instrument: Instrument): void {
   const base = OFF.instruments + index * 16;
   const dest = song.subarray(base, base + 16);
@@ -209,6 +239,41 @@ function writeInstrument(song: Uint8Array, index: number, instrument: Instrument
   }
   writeName(song, OFF.instrumentNames + index * 5, instrument.name, 5);
   song[OFF.instrAlloc + index] = 1;
+}
+
+/** Merge Chippy edits into pulse/wave/noise slots listed in the import map. */
+function mergeEditableInstruments(
+  songBytes: Uint8Array,
+  instruments: Instrument[],
+  editableIndices: number[],
+): void {
+  const byIndex = new Map<number, Instrument>();
+  for (const instrument of instruments) {
+    const match = /^ins-(\d+)$/.exec(instrument.id);
+    if (!match) {
+      continue;
+    }
+    byIndex.set(Number(match[1]) - 1, instrument);
+  }
+  for (const index of editableIndices) {
+    if (index < 0 || index >= MAX_INSTRUMENTS) {
+      continue;
+    }
+    const instrument = byIndex.get(index);
+    if (!instrument) {
+      continue;
+    }
+    if (instrument.kind !== 'pulse' && instrument.kind !== 'wave' && instrument.kind !== 'noise') {
+      continue;
+    }
+    const dest = songBytes.subarray(OFF.instruments + index * 16, OFF.instruments + index * 16 + 16);
+    // Never rewrite kit slots even if the Chippy side was remapped to pulse for display.
+    if (dest[0] === 2) {
+      continue;
+    }
+    mergeInstrumentFields(dest, instrument);
+    writeName(songBytes, OFF.instrumentNames + index * 5, instrument.name, 5);
+  }
 }
 
 function writeWaveforms(song: Uint8Array): void {
@@ -410,6 +475,8 @@ function encodePatchInPlace(
     setTempo(songBytes, song.tempo);
   }
 
+  mergeEditableInstruments(songBytes, song.instruments, importMap.editableInstruments);
+
   const instrumentIndex = instrumentIndexLookup(song.instruments);
 
   const orderLen = song.order.length;
@@ -472,11 +539,11 @@ export function lsdjSavCompatibilityStatus(options?: {
   const hasBase = Boolean(options?.baseSav && options.baseSav.length === LSDJ_SAV_SIZE);
   const preserved = options?.structurePreserved !== false && hasBase;
   const works =
-    'Works now: phrase notes/FX Chippy knows, pulse/wave/noise instruments Chippy edits, tempo, .sav open/export.';
+    'Works now: phrase notes/FX Chippy knows, pulse/wave/noise instrument panel fields, tempo, .sav open/export.';
   const mode = hasBase
     ? preserved
-      ? 'Round-trip: chain layout, tables, grooves, kits, speech, wave bank, and file slots from the opened .sav are preserved on re-export. Chippy still edits a flattened Song Order view.'
-      : 'Round-trip: opened .sav base is kept, but Song Order no longer fully aligns with the import map — chain slots that still map were patched; unmapped Chippy-only rows were not written into the hierarchy.'
+      ? 'Round-trip: chain layout, tables, grooves, kits, speech, wave bank, and file slots from the opened .sav are preserved on re-export. Pulse/wave/noise panel edits merge into original instrument slots without wiping table/kit bits. Chippy still edits a flattened Song Order view.'
+      : 'Round-trip: opened .sav base is kept, but Song Order no longer fully aligns with the import map — chain slots that still map were patched; unmapped Chippy-only rows were not written into the hierarchy. Instrument panel merges still apply to mapped pulse/wave/noise slots.'
     : 'Greenfield: new export builds synthetic chains from Song Order; no tables, grooves, kits, speech, or file slots.';
   const missing =
     'Still missing for full editability: Chains UI, Tables (A), Grooves (G), Synth/wave editor (F), Kits, Speech, File slots /.lsdsng, and engine preview gaps for deferred cmds.';

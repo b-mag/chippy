@@ -353,6 +353,117 @@ describe('export helpers', () => {
     expect(lsdjImportMapAligned(decoded.song, decoded.importMap)).toBe(true);
   });
 
+  it('patch-in-place merges pulse instrument panel fields without wiping table/kit bits', () => {
+    const original = dirtyLsdjSavFixture();
+    const instr0 = 0x3080;
+    // Mark unsupported pulse bits that must survive merge
+    original[instr0 + 2] = 0x12; // PU2 TSP
+    original[instr0 + 5] = 0xa5; // vibrato / pitch / table-mode flags
+    original[instr0 + 6] = 0x27; // table on + table 7
+    original[instr0 + 7] = (original[instr0 + 7] & 0xc0) | 0x2d; // keep duty; stamp panning/finetune
+    original[instr0 + 8] = 0x44; // cmd/rate
+    // Kit slot (index 1): allocated, must never be rewritten by Chippy pulse edits
+    original[0x2040 + 1] = 1;
+    const kitBase = 0x3080 + 16;
+    original[kitBase] = 2; // kit type
+    original[kitBase + 1] = 0x60;
+    original[kitBase + 6] = 0x21; // table on
+    original[kitBase + 12] = 0x99; // kit-specific marker
+
+    const decoded = decodeLsdjSav(original);
+    expect(decoded.importMap.editableInstruments).toContain(0);
+    expect(decoded.importMap.editableInstruments).not.toContain(1);
+
+    const pulse = decoded.song.instruments.find((item) => item.id === 'ins-1');
+    expect(pulse).toBeTruthy();
+    pulse!.name = 'LEAD';
+    pulse!.duty = 1;
+    pulse!.envelopeStart = 10;
+    pulse!.envelopeDown = false;
+    pulse!.envelopePeriod = 3;
+    pulse!.sweepTime = 2;
+    pulse!.sweepShift = 4;
+    pulse!.sweepDown = true;
+
+    const exported = encodeLsdjSav(decoded.song, {
+      baseSav: original,
+      importMap: decoded.importMap,
+      modified: true,
+    });
+
+    // Chippy-owned pulse fields applied
+    expect(exported[instr0]).toBe(0);
+    expect(exported[instr0 + 1]).toBe(0xab); // level 10, rise, period 3
+    expect(exported[instr0 + 4]).toBe(0x2c); // sweep time 2, neg, shift 4
+    expect((exported[instr0 + 7] >> 6) & 3).toBe(1); // duty
+    expect(String.fromCharCode(...exported.subarray(0x1e7a, 0x1e7a + 5)).replace(/\0/g, '')).toBe('LEAD');
+
+    // Unsupported bits preserved
+    expect(exported[instr0 + 2]).toBe(0x12);
+    expect(exported[instr0 + 5]).toBe(0xa5);
+    expect(exported[instr0 + 6]).toBe(0x27);
+    expect(exported[instr0 + 7] & 0x3f).toBe(0x2d);
+    expect(exported[instr0 + 8]).toBe(0x44);
+
+    // Kit slot untouched
+    expect(sliceEqual(exported, original, kitBase, 16)).toBe(true);
+  });
+
+  it('patch-in-place merges wave and noise instrument fields', () => {
+    const original = dirtyLsdjSavFixture();
+    // Convert instrument 0 to wave with preserve markers
+    const waveBase = 0x3080;
+    original[waveBase] = 1;
+    original[waveBase + 1] = 0x60;
+    original[waveBase + 2] = 0x0b; // loop pos marker
+    original[waveBase + 3] = 0x02;
+    original[waveBase + 6] = 0x23; // table on + table 3
+    original[waveBase + 9] = 0x02;
+    // Instrument 1: noise
+    original[0x2040 + 1] = 1;
+    const noiseBase = 0x3080 + 16;
+    original[noiseBase] = 3;
+    original[noiseBase + 1] = 0xc2;
+    original[noiseBase + 2] = 0x00;
+    original[noiseBase + 5] = 0x11;
+    original[noiseBase + 6] = 0x20;
+
+    const decoded = decodeLsdjSav(original);
+    const wave = decoded.song.instruments.find((item) => item.id === 'ins-1')!;
+    const noise = decoded.song.instruments.find((item) => item.id === 'ins-2')!;
+    expect(wave.kind).toBe('wave');
+    expect(noise.kind).toBe('noise');
+    wave.envelopeStart = 5;
+    wave.waveform = 7;
+    wave.name = 'PAD';
+    noise.envelopeStart = 8;
+    noise.envelopeDown = true;
+    noise.envelopePeriod = 1;
+    noise.noiseShort = true;
+    noise.name = 'HH';
+
+    const exported = encodeLsdjSav(decoded.song, {
+      baseSav: original,
+      importMap: decoded.importMap,
+      modified: true,
+    });
+
+    expect(exported[waveBase]).toBe(1);
+    expect(exported[waveBase + 1] & 0x60).toBe(0x20); // ~25% volume
+    expect(exported[waveBase + 2]).toBe(0x0b);
+    expect(exported[waveBase + 3] & 0x0f).toBe(7);
+    expect(exported[waveBase + 6]).toBe(0x23);
+    expect(exported[waveBase + 9]).toBe(0x02);
+    expect(String.fromCharCode(...exported.subarray(0x1e7a, 0x1e7a + 5)).replace(/\0/g, '')).toBe('PAD');
+
+    expect(exported[noiseBase]).toBe(3);
+    expect(exported[noiseBase + 1]).toBe(0x81); // level 8, fall, period 1
+    expect(exported[noiseBase + 2] & 0x01).toBe(1);
+    expect(exported[noiseBase + 5]).toBe(0x11);
+    expect(exported[noiseBase + 6]).toBe(0x20);
+    expect(String.fromCharCode(...exported.subarray(0x1e7a + 5, 0x1e7a + 10)).replace(/\0/g, '')).toBe('HH');
+  });
+
   it('reports LSDJ compatibility status for greenfield vs opened .sav', () => {
     const green = lsdjSavCompatibilityStatus({ baseSav: null });
     expect(green).toMatch(/Greenfield/i);
