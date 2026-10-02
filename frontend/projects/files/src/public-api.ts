@@ -5,7 +5,7 @@ export {
   serializeInstrumentFile,
   type InstrumentFileDocument,
 } from './lib/instrument-file';
-export { encodeYm6, parseYm, type ParsedYm } from './lib/ym6';
+export { encodeYm6, parseYm, unwrapYmPayload, type ParsedYm } from './lib/ym6';
 export { encodeVgm } from './lib/vgm';
 export { a4Hz, a4Period, encodeWav, renderPcm } from './lib/pcm';
 export { AkyUnsupportedError, encodeAky } from './lib/aky';

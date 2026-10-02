@@ -1,4 +1,3 @@
-import { HttpClient } from '@angular/common/http';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -22,6 +21,9 @@ import {
   fmAlgorithmRouting,
   fmFieldValue,
   effectCmdsForChip,
+  effectColumnHint,
+  effectHelp,
+  effectReferenceForChip,
   formatEffect,
   formatNote,
   isChipId,
@@ -47,7 +49,6 @@ import {
   type InstrumentKind,
   type InstrumentPreset,
   type PresetMenuEntry,
-  type Project,
 } from '@chippy/domain';
 import { PlaybackService, type LoopMode } from '../playback.service';
 import { RadioPlayerService } from '../radio/radio-player.service';
@@ -66,7 +67,6 @@ export class TrackerComponent {
   readonly columns: ColumnId[] = ['note', 'instrument', 'volume', 'effect'];
   private readonly playback = inject(PlaybackService);
   private readonly radio = inject(RadioPlayerService);
-  private readonly http = inject(HttpClient);
   private readonly entitlement = inject(SupportEntitlementService);
   private readonly renameInput = viewChild<ElementRef<HTMLInputElement>>('renameInput');
   private readonly instrumentDialog = viewChild<ElementRef<HTMLElement>>('instrumentDialog');
@@ -88,6 +88,7 @@ export class TrackerComponent {
   readonly muted = signal<ReadonlySet<number>>(new Set());
   readonly solo = signal<ReadonlySet<number>>(new Set());
   readonly exportOpen = signal(false);
+  readonly fxReferenceOpen = signal(false);
   readonly presetsOpen = signal(false);
   readonly instrumentEditorOpen = signal(false);
   readonly presetSearch = signal('');
@@ -229,6 +230,45 @@ export class TrackerComponent {
     const chip = this.project().chip;
     return chip === 'vectrex' || chip === 'atarist';
   });
+  readonly isGameBoy = computed(() => this.project().chip === 'gameboy');
+  readonly fxReference = computed(() => effectReferenceForChip(this.project().chip));
+  readonly fxInspector = computed(() => {
+    const chip = this.project().chip;
+    const cursor = this.state().cursor;
+    if (cursor.column !== 'effect') {
+      return null;
+    }
+    const cell = this.pattern().rows[cursor.row]?.[cursor.channel];
+    const effect = cell?.effect ?? null;
+    const display = formatEffect(effect, chip);
+    if (!effect) {
+      return {
+        display,
+        title: 'Empty FX',
+        summary:
+          chip === 'gameboy'
+            ? 'Type a letter (A–Z command), then two hex digits.'
+            : 'Type a letter (A/U/D/R/C/P), then a hex nibble.',
+        previewNote: undefined as string | undefined,
+      };
+    }
+    const help = effectHelp(effect.cmd, chip);
+    return {
+      display,
+      title: help ? `${effect.cmd} · ${help.name}` : effect.cmd,
+      summary: help?.summary ?? 'Unknown command for this chip.',
+      previewNote: help?.previewNote,
+    };
+  });
+  readonly fxIdleTip = computed(() => {
+    if (this.state().cursor.column === 'effect') {
+      return null;
+    }
+    if (this.project().chip !== 'gameboy') {
+      return null;
+    }
+    return 'FX · letter then two hex digits · ? for LSDJ list';
+  });
   readonly exportKinds = computed(() => {
     const chip = this.project().chip;
     if (chip === 'gameboy') {
@@ -357,7 +397,19 @@ export class TrackerComponent {
     if (column === 'volume') {
       return 'Volume — hex 0–F; .. = use instrument level';
     }
-    return 'FX — A vol down, U vol up, D delay, R retrigger, C cut, P pitch (letter then hex value)';
+    return this.effectColumnTitle();
+  }
+
+  effectColumnTitle(): string {
+    return effectColumnHint(this.project().chip);
+  }
+
+  toggleFxReference(): void {
+    this.fxReferenceOpen.update((open) => !open);
+  }
+
+  closeFxReference(): void {
+    this.fxReferenceOpen.set(false);
   }
 
   private syncArmedFromCursor(): void {
@@ -420,6 +472,9 @@ export class TrackerComponent {
       }
     } else if (key === '[' || key === ']') {
       this.session.octave(this.state().octave + (key === ']' ? 1 : -1));
+    } else if (key === '?' && this.project().chip === 'gameboy') {
+      event.preventDefault();
+      this.toggleFxReference();
     } else if (!this.auditionOnly() && this.state().cursor.column === 'instrument') {
       this.enterInstrumentKey(key);
     } else if (!this.auditionOnly() && this.state().cursor.column === 'volume' && /^[0-9a-f]$/i.test(key)) {
@@ -764,7 +819,7 @@ export class TrackerComponent {
     input.value = '';
   }
 
-  open(file: File | undefined): void {
+  async open(file: File | undefined): Promise<void> {
     if (!file) return;
     if (this.state().dirty) {
       const ok = window.confirm(
@@ -774,16 +829,16 @@ export class TrackerComponent {
         return;
       }
     }
-    const body = new FormData();
-    body.set('file', file);
-    this.http.post<Project>('/api/projects/validate', body).subscribe({
-      next: (project) => {
-        this.playback.stop();
-        this.session.load(project);
-        this.status.set('Opened project.');
-      },
-      error: () => this.status.set('That file was rejected.'),
-    });
+    try {
+      const text = await file.text();
+      const files = await import('@chippy/files');
+      const project = files.parseProject(text);
+      this.playback.stop();
+      this.session.load(project);
+      this.status.set('Opened project.');
+    } catch (error) {
+      this.status.set(error instanceof Error ? error.message : 'That file was rejected.');
+    }
   }
 
   toggleExport(event: Event): void {
@@ -800,6 +855,10 @@ export class TrackerComponent {
 
   @HostListener('document:keydown.escape')
   onDocumentEscape(): void {
+    if (this.fxReferenceOpen()) {
+      this.closeFxReference();
+      return;
+    }
     if (this.presetsOpen()) {
       this.closePresetsModal();
       return;
@@ -825,7 +884,11 @@ export class TrackerComponent {
         : kind === 'sav' ? [files.exportLsdjSav(song)]
         : [aky!.songFile, aky!.configFile];
       bundles.forEach((bundle) => this.download(bundle.bytes, bundle.filename, bundle.mime));
-      this.status.set('Export ready.');
+      this.status.set(
+        kind === 'sav'
+          ? 'LSDJ .sav ready — chains are synthetic from Song Order; tables, grooves, kits, and speech are not in Chippy yet.'
+          : 'Export ready.',
+      );
     } catch (error) {
       this.status.set(error instanceof Error ? error.message : 'Export failed.');
     }

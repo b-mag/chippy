@@ -67,6 +67,63 @@ function cstring(data: Uint8Array, offset: number): { value: string; next: numbe
   return { value, next: end + 1 };
 }
 
+const MAX_YM_UPLOAD = 8_000_000;
+const MAX_YM_UNCOMPRESSED = 4_000_000;
+
+function readUint32Le(data: Uint8Array, offset: number): number {
+  return (
+    (data[offset] |
+      (data[offset + 1] << 8) |
+      (data[offset + 2] << 16) |
+      (data[offset + 3] << 24)) >>>
+    0
+  );
+}
+
+function looksLikeLha(data: Uint8Array): boolean {
+  if (data.length < 21) {
+    return false;
+  }
+  const headerSize = data[0];
+  if (headerSize < 20 || headerSize + 2 > data.length) {
+    return false;
+  }
+  const method = new TextDecoder().decode(data.subarray(2, 7));
+  return method.startsWith('-lh') && method.endsWith('-');
+}
+
+/**
+ * Unwrap stored LHA (-lh0-) if present; otherwise return the bytes unchanged.
+ * Compressed LHA methods are rejected (same policy as the optional API validator).
+ */
+export function unwrapYmPayload(data: Uint8Array, maxUncompressed = MAX_YM_UNCOMPRESSED): Uint8Array {
+  if (data.length === 0 || data.length > MAX_YM_UPLOAD) {
+    throw new Error('YM file is empty or larger than 8 MB.');
+  }
+  if (!looksLikeLha(data)) {
+    return data;
+  }
+  const headerSize = data[0];
+  const method = new TextDecoder().decode(data.subarray(2, 7));
+  const compressed = readUint32Le(data, 7);
+  const original = readUint32Le(data, 11);
+  if (original > maxUncompressed) {
+    throw new Error('YM archive is larger than the allowed size.');
+  }
+  const dataStart = 2 + headerSize;
+  if (dataStart > data.length || compressed > data.length - dataStart) {
+    throw new Error('YM archive header does not match its body.');
+  }
+  if (method !== '-lh0-') {
+    throw new Error('Only stored LHA (lh0) and raw YM5/YM6 are accepted.');
+  }
+  const payload = data.subarray(dataStart, dataStart + compressed);
+  if (payload.length < original) {
+    throw new Error('YM archive ended early.');
+  }
+  return payload.subarray(0, original);
+}
+
 /** Read an uncompressed YM5! or YM6! dump. Anything else is rejected. */
 export function parseYm(data: Uint8Array): ParsedYm {
   const magic = new TextDecoder().decode(data.subarray(0, 4));

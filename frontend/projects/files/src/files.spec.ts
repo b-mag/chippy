@@ -20,6 +20,7 @@ import {
   renderPcm,
   serializeInstrumentFile,
   serializeProject,
+  unwrapYmPayload,
 } from '@chippy/files';
 
 describe('project file', () => {
@@ -365,5 +366,31 @@ describe('export helpers', () => {
     expect(() => parseYm(withDigi)).toThrow(/digidrums/);
     expect(() => parseYm(new Uint8Array([...'YM6!NOTLEON!'.split('').map((c) => c.charCodeAt(0))]))).toThrow(/check string/);
     expect(() => parseYm(bytes.subarray(0, 40))).toThrow();
+
+    const raw = encodeYm6([ay], 'Solo');
+    expect(unwrapYmPayload(raw)).toEqual(raw);
+    const name = 'song.ym';
+    const headerSize = 22 + name.length;
+    const lha = new Uint8Array(2 + headerSize + raw.length);
+    lha[0] = headerSize;
+    lha[1] = 0;
+    lha.set(new TextEncoder().encode('-lh0-'), 2);
+    lha[7] = raw.length & 0xff;
+    lha[8] = (raw.length >> 8) & 0xff;
+    lha[9] = (raw.length >> 16) & 0xff;
+    lha[10] = (raw.length >> 24) & 0xff;
+    lha[11] = raw.length & 0xff;
+    lha[12] = (raw.length >> 8) & 0xff;
+    lha[13] = (raw.length >> 16) & 0xff;
+    lha[14] = (raw.length >> 24) & 0xff;
+    lha[21] = name.length;
+    lha.set(new TextEncoder().encode(name), 22);
+    lha.set(raw, 2 + headerSize);
+    expect(parseYm(unwrapYmPayload(lha)).name).toBe('Solo');
+
+    const compressed = Uint8Array.from(lha);
+    compressed.set(new TextEncoder().encode('-lh5-'), 2);
+    expect(() => unwrapYmPayload(compressed)).toThrow(/lh0/);
+    expect(() => unwrapYmPayload(new Uint8Array(0))).toThrow(/empty|larger/);
   });
 });

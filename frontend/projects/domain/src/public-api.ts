@@ -35,6 +35,12 @@ export {
   type SongBody,
 } from './lib/types';
 export {
+  effectColumnHint,
+  effectHelp,
+  effectReferenceForChip,
+  type EffectHelp,
+} from './lib/effects';
+export {
   type ChipChannel,
   type ChipDefinition,
   type InstrumentField,

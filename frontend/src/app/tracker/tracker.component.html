@@ -106,7 +106,39 @@
     aria-label="Pattern"
     [style.--channels]="chip().channels.length"
     (focusin)="studioFocused.set(false)">
-    <h2 class="grid-title" title="Pattern grid: 16 rows. Columns per channel are Note, Instrument, Volume, FX.">Pattern</h2>
+    <div class="grid-title-row">
+      <h2 class="grid-title" title="Pattern grid: 16 rows. Columns per channel are Note, Instrument, Volume, FX.">Pattern</h2>
+      @if (isGameBoy()) {
+        <button
+          type="button"
+          class="btn-fx-ref"
+          [attr.aria-expanded]="fxReferenceOpen()"
+          title="LSDJ phrase FX reference (?)"
+          (click)="toggleFxReference()">
+          FX
+        </button>
+      }
+    </div>
+    @if (fxReferenceOpen() && isGameBoy()) {
+      <div class="fx-reference" role="region" aria-label="LSDJ FX reference">
+        <div class="fx-reference-head">
+          <span>LSDJ phrase FX</span>
+          <button type="button" class="btn-fx-ref-close" (click)="closeFxReference()" title="Close">Close</button>
+        </div>
+        <ul class="fx-reference-list">
+          @for (entry of fxReference(); track entry.cmd) {
+            <li>
+              <span class="fx-ref-cmd">{{ entry.cmd }}</span>
+              <span class="fx-ref-name">{{ entry.name }}</span>
+              <span class="fx-ref-summary">{{ entry.summary }}</span>
+              @if (entry.previewNote) {
+                <span class="fx-ref-preview">{{ entry.previewNote }}</span>
+              }
+            </li>
+          }
+        </ul>
+      </div>
+    }
     <div class="grid-head" role="row">
       <span></span>
       @for (channel of chip().channels; track channel.id; let index = $index) {
@@ -128,7 +160,7 @@
               <span title="Note: piano keys write a pitch. ` or ~ = note cut (OFF).">N</span>
               <span title="Instrument: type 1–9 (or the panel number) to assign that instrument. 0 clears.">I</span>
               <span title="Volume: hex 0–F. Empty (..) keeps the instrument’s own level.">V</span>
-              <span title="FX: A = volume slide down, D = delay note, R = retrigger. Letter then hex value.">FX</span>
+              <span [title]="effectColumnTitle()">FX</span>
             </span>
             <span class="channel-toggles">
               <button type="button" class="btn-mute" title="Mute this channel during playback" (click)="toggleChannel('mute', index)">{{ muted().has(index) ? 'Unmute' : 'Mute' }}</button>
@@ -434,6 +466,18 @@
     </div>
   }
 
-  <p class="hint">Z through M play notes. Q through U is the next octave. Arrows move. Backtick cuts the note. Space plays. Ctrl+Z undoes. Ctrl+Y or Ctrl+Shift+Z redoes. Octave {{ state().octave }}.</p>
+  @if (fxInspector(); as fx) {
+    <p class="fx-inspector" role="status">
+      <span class="fx-inspector-cell">{{ fx.display }}</span>
+      <span class="fx-inspector-title">{{ fx.title }}</span>
+      <span class="fx-inspector-summary">{{ fx.summary }}</span>
+      @if (fx.previewNote) {
+        <span class="fx-inspector-preview">{{ fx.previewNote }}</span>
+      }
+    </p>
+  } @else if (fxIdleTip()) {
+    <p class="fx-inspector fx-inspector--idle" role="note">{{ fxIdleTip() }}</p>
+  }
+  <p class="hint">Z through M play notes. Q through U is the next octave. Arrows move. Backtick cuts the note. Space plays. Ctrl+Z undoes. Ctrl+Y or Ctrl+Shift+Z redoes. Octave {{ state().octave }}.@if (isGameBoy()) { ? toggles LSDJ FX.}</p>
   <p class="status" role="status">{{ status() }}</p>
 </div>

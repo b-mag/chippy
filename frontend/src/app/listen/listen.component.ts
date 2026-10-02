@@ -1,4 +1,3 @@
-import { HttpClient } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, ElementRef, inject, signal, viewChild } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import type { AyFrame } from '@chippy/engines';
@@ -12,7 +11,6 @@ import { SessionService } from '../session.service';
   templateUrl: './listen.component.html',
 })
 export class ListenComponent {
-  private readonly http = inject(HttpClient);
   private readonly session = inject(SessionService);
   private readonly playback = inject(PlaybackService);
   private readonly router = inject(Router);
@@ -27,27 +25,25 @@ export class ListenComponent {
   readonly end = signal(0);
   private drag: 'start' | 'end' | null = null;
 
-  open(file: File | undefined): void {
+  async open(file: File | undefined): Promise<void> {
     if (!file) {
       return;
     }
-    const body = new FormData();
-    body.set('file', file);
-    this.http.post<{ ymBase64: string }>('/api/ym/validate', body).subscribe({
-      next: async (response) => {
-        const files = await import('@chippy/files');
-        const binary = Uint8Array.from(atob(response.ymBase64), (char) => char.charCodeAt(0));
-        const parsed = files.parseYm(binary);
-        this.frames = parsed.frames;
-        this.frameRate = parsed.frameRate || 50;
-        this.name.set(parsed.name);
-        this.start.set(0);
-        this.end.set(Math.max(0, parsed.frames.length - 1));
-        this.status.set(`${parsed.frames.length} frames ready.`);
-        this.draw();
-      },
-      error: () => this.status.set('That YM was rejected.'),
-    });
+    try {
+      const files = await import('@chippy/files');
+      const binary = new Uint8Array(await file.arrayBuffer());
+      const payload = files.unwrapYmPayload(binary);
+      const parsed = files.parseYm(payload);
+      this.frames = parsed.frames;
+      this.frameRate = parsed.frameRate || 50;
+      this.name.set(parsed.name);
+      this.start.set(0);
+      this.end.set(Math.max(0, parsed.frames.length - 1));
+      this.status.set(`${parsed.frames.length} frames ready.`);
+      this.draw();
+    } catch (error) {
+      this.status.set(error instanceof Error ? error.message : 'That YM was rejected.');
+    }
   }
 
   play(): void {
