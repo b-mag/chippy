@@ -10,7 +10,7 @@ import java.util.Map;
 /**
  * Accepts a Chippy project only when every field is known, then writes it
  * back out so the browser never keeps the raw upload. Legacy v1 flat songs
- * and v2 projects are migrated to the v3 project shape (customPresets).
+ * and v2/v3 projects are migrated to the current project shape (customPresets, v4).
  */
 public final class ProjectValidator {
 
@@ -43,11 +43,22 @@ public final class ProjectValidator {
                 validateV2(document);
                 return MAPPER.writeValueAsBytes(migrateV2(document));
             }
-            if (Integer.valueOf(3).equals(version) || Integer.valueOf(3).equals(asInt(version))) {
+            if (Integer.valueOf(3).equals(version) || Integer.valueOf(3).equals(asInt(version))
+                    || Integer.valueOf(4).equals(version) || Integer.valueOf(4).equals(asInt(version))) {
                 assertOnlyKeys(raw, "version", "name", "chip", "instruments", "armedInstrumentId", "songs", "activeSongId", "customPresets");
                 ProjectDocumentV3 document = MAPPER.convertValue(raw, ProjectDocumentV3.class);
                 validateV3(document);
-                return MAPPER.writeValueAsBytes(document);
+                // Bump to v4 on reparse; browser applies Game Boy FX remaps when loading older files.
+                return MAPPER.writeValueAsBytes(new ProjectDocumentV3(
+                        4,
+                        document.name(),
+                        document.chip(),
+                        document.instruments(),
+                        document.armedInstrumentId(),
+                        document.songs(),
+                        document.activeSongId(),
+                        document.customPresets() == null ? List.of() : document.customPresets()
+                ));
             }
             throw new UploadRejectedException("Unsupported project version.");
         } catch (UploadRejectedException exception) {
@@ -134,7 +145,7 @@ public final class ProjectValidator {
                 legacy.patterns()
         );
         return new ProjectDocumentV3(
-                3,
+                4,
                 legacy.name(),
                 legacy.chip(),
                 legacy.instruments(),
@@ -147,7 +158,7 @@ public final class ProjectValidator {
 
     private static ProjectDocumentV3 migrateV2(ProjectDocumentV2 document) {
         return new ProjectDocumentV3(
-                3,
+                4,
                 document.name(),
                 document.chip(),
                 document.instruments(),

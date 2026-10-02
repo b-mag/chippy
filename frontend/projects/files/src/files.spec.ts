@@ -1,16 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { enterNote, newProject, newSession, randomSong, songForRender, updateInstrument } from '@chippy/domain';
-import { renderSong } from '@chippy/engines';
+import { renderSong, type AyFrame, type GbFrame } from '@chippy/engines';
 import {
   a4Hz,
   a4Period,
   downloadName,
+  encodeLsdjSav,
   encodeYm6,
   exportAky,
+  exportLsdjSav,
   exportVgm,
   exportWav,
   exportYm,
   instrumentDownloadName,
+  LSDJ_SAV_SIZE,
   parseInstrumentFile,
   parseProject,
   parseYm,
@@ -18,7 +21,6 @@ import {
   serializeInstrumentFile,
   serializeProject,
 } from '@chippy/files';
-import type { AyFrame, GbFrame } from '@chippy/engines';
 
 describe('project file', () => {
   it('round-trips a project, migrates v1, and rejects unknown fields', () => {
@@ -55,6 +57,21 @@ describe('project file', () => {
         value: 3,
       });
     }
+    // Game Boy accepts LSDJ FX (including Z) on v4.
+    const gbFx = JSON.parse(serializeProject(project));
+    gbFx.songs[0].patterns[0].rows[0][0].effect = { cmd: 'Z', value: 0x22 };
+    expect(parseProject(JSON.stringify(gbFx)).songs[0].patterns[0].rows[0][0].effect).toEqual({
+      cmd: 'Z',
+      value: 0x22,
+    });
+    // v3 Game Boy remaps shared C cut → LSDJ K.
+    const legacyGbFx = JSON.parse(serializeProject(project));
+    legacyGbFx.version = 3;
+    legacyGbFx.songs[0].patterns[0].rows[0][0].effect = { cmd: 'C', value: 2 };
+    expect(parseProject(JSON.stringify(legacyGbFx)).songs[0].patterns[0].rows[0][0].effect).toEqual({
+      cmd: 'K',
+      value: 2,
+    });
     expect(downloadName({ ...project, name: 'My Song!' }, 'json')).toBe('My-Song.json');
     expect(downloadName({ ...project, name: '!!!' }, 'json')).toBe('chippy.json');
     const legacy = {
@@ -68,25 +85,25 @@ describe('project file', () => {
       armedInstrumentId: project.armedInstrumentId,
     };
     const migrated = parseProject(JSON.stringify(legacy));
-    expect(migrated.version).toBe(3);
+    expect(migrated.version).toBe(4);
     expect(migrated.customPresets).toEqual([]);
     expect(migrated.songs[0].patterns[0].name).toBe('Pattern 1');
-    const v3 = parseProject(text);
-    expect(v3.version).toBe(3);
-    expect(v3.customPresets).toEqual([]);
+    const v4 = parseProject(text);
+    expect(v4.version).toBe(4);
+    expect(v4.customPresets).toEqual([]);
     const asV2 = JSON.parse(text);
     asV2.version = 2;
     delete asV2.customPresets;
     const fromV2 = parseProject(JSON.stringify(asV2));
-    expect(fromV2.version).toBe(3);
+    expect(fromV2.version).toBe(4);
     expect(fromV2.customPresets).toEqual([]);
     expect(parseProject(JSON.stringify({
-      ...v3,
+      ...v4,
       songs: [{ id: 'song-1', name: 'A', tempo: 100, order: ['pat-1'], patterns: [{ id: 'pat-1', rows: project.songs[0].patterns[0].rows }] }],
       activeSongId: 'missing',
     })).activeSongId).toBe('song-1');
     expect(() => parseProject(JSON.stringify({
-      version: 3,
+      version: 4,
       name: 'X',
       chip: 'gameboy',
       instruments: project.instruments,
@@ -96,17 +113,17 @@ describe('project file', () => {
       customPresets: [],
     }))).toThrow(/order|patterns/);
     expect(() => parseProject(JSON.stringify({
-      version: 3,
+      version: 4,
       name: 'X',
       chip: 'gameboy',
       instruments: [],
       armedInstrumentId: 'ins-1',
-      songs: v3.songs,
-      activeSongId: v3.activeSongId,
+      songs: v4.songs,
+      activeSongId: v4.activeSongId,
       customPresets: [],
     }))).toThrow(/instruments/);
     const withCustom = {
-      ...v3,
+      ...v4,
       customPresets: [{
         id: 'custom-1',
         name: 'My lead',
@@ -166,6 +183,39 @@ describe('export helpers', () => {
     expect(exportVgm(song).filename.endsWith('.vgm')).toBe(true);
     expect(() => exportYm(song)).toThrow(/Vectrex/);
     expect(() => exportAky(song)).toThrow(/Vectrex/);
+  });
+
+  it('exports an LSDJ-compatible .sav for game boy', () => {
+    const state = enterNote(newSession('gameboy'), 60);
+    const song = songForRender(state.project);
+    song.tempo = 145;
+    song.patterns[0].rows[0][0] = {
+      ...song.patterns[0].rows[0][0],
+      effect: { cmd: 'C', value: 0x37 },
+    };
+    const bundle = exportLsdjSav(song);
+    expect(bundle.filename.endsWith('.sav')).toBe(true);
+    expect(bundle.bytes.length).toBe(LSDJ_SAV_SIZE);
+    const bytes = encodeLsdjSav(song);
+    expect(bytes.length).toBe(LSDJ_SAV_SIZE);
+    // Work-song init markers "rb"
+    expect(String.fromCharCode(bytes[0x1e78], bytes[0x1e79])).toBe('rb');
+    expect(String.fromCharCode(bytes[0x3e80], bytes[0x3e81])).toBe('rb');
+    expect(String.fromCharCode(bytes[0x7ff0], bytes[0x7ff1])).toBe('rb');
+    // File-memory init "jk"
+    expect(String.fromCharCode(bytes[0x8000 + 0x13e], bytes[0x8000 + 0x13f])).toBe('jk');
+    expect(bytes[0x3fb4]).toBe(145);
+    // Phrase 0 note / instrument / chord command
+    expect(bytes[0x0000]).toBe(60);
+    expect(bytes[0x7000]).toBe(0); // instrument 0
+    expect(bytes[0x4000]).toBe(2); // LSDJ C
+    expect(bytes[0x4ff0]).toBe(0x37);
+    // Sequence row 0 has a chain on each channel
+    expect(bytes[0x1290]).toBe(0);
+    expect(bytes[0x1291]).toBe(1);
+    expect(bytes[0x1292]).toBe(2);
+    expect(bytes[0x1293]).toBe(3);
+    expect(() => exportLsdjSav(songForRender(newSession('vectrex').project))).toThrow(/Game Boy/);
   });
 
   it('exports ym and aky for vectrex', () => {

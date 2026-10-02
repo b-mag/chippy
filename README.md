@@ -13,15 +13,15 @@ A web tracker for writing Game Boy, Vectrex, C64, Atari ST, and NES chiptunes. K
 - One screen with Song Order, every channel, and the instrument studio.
 - A project holds one chip, a shared instrument bank, and one or more songs.
 - Game Boy (PU1/PU2/WAV/NOI), Vectrex (three tone channels), C64 (three SID voices), Atari ST (YM2149 tones), and NES (PU1/PU2/TRI/NOI).
-- Pattern grid columns: note, instrument, volume, and a shared FX column (`A` volume slide down, `U` volume slide up, `D` note delay, `R` retrigger, `C` timed cut, `P` pitch slide).
+- Pattern grid columns: note, instrument, volume, and FX. Non-Game-Boy chips use the shared FX set (`A`/`U`/`D`/`R`/`C`/`P`). Game Boy uses full LSDJ phrase commands with hex values (`00`–`FF`).
 - Instrument studio: rename/type/delete, pitch audition, chip-specific hardware controls, free and premium presets grouped by role then kind (`presets.unlockAll` in config unlocks premium for local/dev). Save project-scoped custom presets from the armed instrument.
 - Changing chip starts a new blank project after confirm. Opening a project warns when the session is dirty.
 - The keyboard plays a note as you write it. Undo, mute, and solo are on that screen.
 - Vaporwave, dark, and plain paint, chosen from a Paint dropdown (defaults to vaporwave).
 - A short opening animation. Set `splashEnabled` to `false` in `frontend/public/config.json`, or `chippy.splash.enabled` in `chippy-api/src/main/resources/application.yml`.
-- Save a `.chippy.json` project (v2) and open one again. Legacy v1 song files migrate on open. Uploads are parsed and rejected when they are not a project or a YM file.
+- Save a `.chippy.json` project (v4) and open one again. Legacy v1–v3 files migrate on open (Game Boy v3 shared FX remaps toward LSDJ commands). Uploads are parsed and rejected when they are not a project or a YM file.
 - Create a random song after a warning and typing YES.
-- Export WAV (all chips), YM6 (Vectrex and Atari ST), Vectrex AKY, Game Boy VGM.
+- Export WAV (all chips), YM6 (Vectrex and Atari ST), Vectrex AKY, Game Boy VGM, and Game Boy **LSDJ `.sav`** (128KB flash-cart save).
 - Open a YM beside the song, play a range, and keep it as an instrument.
 - Radio tab: Rainwave Chiptunes, CVGM, and Nectarine streams; reconnect on stall; Rainwave now-playing titles when the API answers.
 - Optional Buy Me a Coffee prompt and Google AdSense slot, both off until you configure them. See [MONETIZATION_SETUP.md](MONETIZATION_SETUP.md).
@@ -29,7 +29,7 @@ A web tracker for writing Game Boy, Vectrex, C64, Atari ST, and NES chiptunes. K
 
 ## Later
 
-See [FUTURE.md](FUTURE.md) for the backlog: mobile phone browser compatibility, LSDJ `.SAV` / `.lsdsng` export (synthetic chains from flat order), Chains/tables/grooves UI, deeper NES/SID tools, Chippy-owned YM Radio, and real donor sign-in.
+See [FUTURE.md](FUTURE.md) for the backlog: LSDJ `.sav` **import** (flagship), Chains/tables/grooves UI, mobile web tracker, deeper NES/SID tools, Chippy-owned YM Radio, and real donor sign-in.
 
 ## Run it locally
 

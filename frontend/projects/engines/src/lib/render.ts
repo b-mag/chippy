@@ -85,14 +85,28 @@ interface Voice {
   pendingVolume: number | null;
   delayFramesLeft: number;
   volumeSlide: number;
-  /** Frames left before cut at tick start (effect C). -1 = inactive; 0 = cut now. */
+  /** Frames left before cut at tick start (effect C / K). -1 = inactive; 0 = cut now. */
   cutAfter: number;
-  /** Semitone delta applied each frame (effect P). */
+  /** Semitone delta applied each frame (effect P / L). */
   pitchSlide: number;
   retriggerPeriod: number;
   retriggerAge: number;
   gateAge: number;
   gated: boolean;
+  /** LSDJ C chord: semitone offsets cycled each row tick. */
+  chordOffsets: number[] | null;
+  chordIndex: number;
+  /** LSDJ V vibrato depth (semitone amplitude). */
+  vibratoDepth: number;
+  vibratoPhase: number;
+  /** LSDJ W duty override 0-3; null keeps instrument duty. */
+  dutyOverride: number | null;
+  /** LSDJ E envelope start override 0-15. */
+  envelopeOverride: number | null;
+  /** LSDJ H: next phrase step, or -1 to stop channel. */
+  hopStep: number | null;
+  /** LSDJ B maybe: skip the note on this row. */
+  maybeMute: boolean;
 }
 
 function instrumentOf(song: Song, id: string | null): Instrument | undefined {
@@ -117,6 +131,14 @@ function silentVoices(count: number): Voice[] {
     retriggerAge: 0,
     gateAge: 0,
     gated: false,
+    chordOffsets: null,
+    chordIndex: 0,
+    vibratoDepth: 0,
+    vibratoPhase: 0,
+    dutyOverride: null,
+    envelopeOverride: null,
+    hopStep: null,
+    maybeMute: false,
   }));
 }
 
@@ -129,13 +151,24 @@ function cutVoice(voice: Voice): void {
   voice.pitchSlide = 0;
   voice.gated = false;
   voice.gateAge = 0;
+  voice.chordOffsets = null;
+  voice.vibratoDepth = 0;
+  voice.hopStep = null;
 }
 
 function soundingMidi(voice: Voice, macroOffset = 0): number | null {
   if (voice.note === null) {
     return null;
   }
-  return Math.min(127, Math.max(0, Math.round(voice.note + macroOffset)));
+  let chord = 0;
+  if (voice.chordOffsets && voice.chordOffsets.length > 0) {
+    chord = voice.chordOffsets[voice.chordIndex % voice.chordOffsets.length] ?? 0;
+  }
+  let vibrato = 0;
+  if (voice.vibratoDepth > 0) {
+    vibrato = Math.sin(voice.vibratoPhase) * voice.vibratoDepth;
+  }
+  return Math.min(127, Math.max(0, Math.round(voice.note + macroOffset + chord + vibrato)));
 }
 
 function dominantTone(frame: number[]): { period: number; volume: number } {
@@ -150,14 +183,12 @@ function dominantTone(frame: number[]): { period: number; volume: number } {
   return best;
 }
 
-function applyEffect(voice: Voice, effect: CellEffect | null): void {
-  voice.volumeSlide = 0;
-  voice.retriggerPeriod = 0;
-  voice.cutAfter = -1;
-  voice.pitchSlide = 0;
-  if (!effect) {
-    return;
-  }
+function signedByte(value: number): number {
+  const v = value & 0xff;
+  return v >= 0x80 ? v - 256 : v;
+}
+
+function applySharedEffect(voice: Voice, effect: CellEffect): void {
   if (effect.cmd === 'A') {
     voice.volumeSlide = -(effect.value & 0x0f);
   } else if (effect.cmd === 'U') {
@@ -172,28 +203,124 @@ function applyEffect(voice: Voice, effect: CellEffect | null): void {
   }
 }
 
+/** LSDJ phrase commands for Game Boy preview. A/G/F stay no-ops until tables/grooves/synth UI exist. */
+function applyLsdjEffect(voice: Voice, effect: CellEffect): void {
+  const value = effect.value & 0xff;
+  switch (effect.cmd) {
+    case 'D':
+      // Delay is applied when the note is scheduled in applyRow.
+      break;
+    case 'K':
+      voice.cutAfter = value & 0x0f;
+      break;
+    case 'R':
+      voice.retriggerPeriod = Math.max(1, value & 0x0f);
+      voice.retriggerAge = 0;
+      break;
+    case 'P':
+    case 'L':
+      voice.pitchSlide = Math.max(-4, Math.min(4, Math.trunc(signedByte(value) / 16)));
+      break;
+    case 'C': {
+      const hi = (value >> 4) & 0x0f;
+      const lo = value & 0x0f;
+      voice.chordOffsets = [0, hi, lo];
+      voice.chordIndex = 0;
+      break;
+    }
+    case 'E':
+      voice.envelopeOverride = (value >> 4) & 0x0f;
+      voice.volume = voice.envelopeOverride;
+      break;
+    case 'M':
+      voice.volume = (value >> 4) & 0x0f;
+      break;
+    case 'W':
+      voice.dutyOverride = value & 0x03;
+      break;
+    case 'S':
+      // Sweep shape preview: nudge pitch from high nibble.
+      voice.pitchSlide = ((value >> 4) & 0x0f) - 8;
+      break;
+    case 'V':
+      voice.vibratoDepth = Math.max(0.25, (value & 0x0f) / 4);
+      voice.vibratoPhase = 0;
+      break;
+    case 'B':
+      voice.maybeMute = ((value & 0xff) / 255) > Math.random();
+      break;
+    case 'Z':
+      voice.pitchSlide = (Math.random() * 4 - 2);
+      break;
+    case 'H':
+      if (value === 0xff) {
+        voice.hopStep = -1;
+      } else if (value <= 0x0f) {
+        voice.hopStep = value & 0x0f;
+      } else {
+        // Hxy hop-back: treat as jump to low nibble step.
+        voice.hopStep = value & 0x0f;
+      }
+      break;
+    case 'O':
+    case 'T':
+    case 'A':
+    case 'G':
+    case 'F':
+      // Pan / tempo / table / groove / frame: export-faithful, preview deferred.
+      break;
+    default:
+      break;
+  }
+}
+
+function applyEffect(voice: Voice, effect: CellEffect | null, chip: ChipId): void {
+  voice.volumeSlide = 0;
+  voice.retriggerPeriod = 0;
+  voice.cutAfter = -1;
+  voice.pitchSlide = 0;
+  voice.chordOffsets = null;
+  voice.vibratoDepth = 0;
+  voice.dutyOverride = null;
+  voice.envelopeOverride = null;
+  voice.hopStep = null;
+  voice.maybeMute = false;
+  if (!effect) {
+    return;
+  }
+  if (chip === 'gameboy') {
+    applyLsdjEffect(voice, effect);
+  } else {
+    applySharedEffect(voice, effect);
+  }
+}
+
 function triggerNote(
   voice: Voice,
   note: number,
   instrumentId: string | null,
   volume: number | null,
 ): void {
+  if (voice.maybeMute) {
+    voice.maybeMute = false;
+    return;
+  }
   voice.active = true;
   voice.note = note;
   voice.instrumentId = instrumentId;
-  voice.volume = volume;
+  voice.volume = volume ?? voice.envelopeOverride ?? volume;
   voice.snipIndex = 0;
   voice.gateAge = 0;
   voice.gated = true;
 }
 
-function applyRow(voices: Voice[], row: Cell[]): void {
+function applyRow(voices: Voice[], row: Cell[], chip: ChipId): void {
   voices.forEach((voice, index) => {
     const cell = row[index];
     if (!cell) {
       return;
     }
-    applyEffect(voice, cell.effect ?? null);
+    applyEffect(voice, cell.effect ?? null, chip);
     if (cell.cut) {
       cutVoice(voice);
       return;
@@ -236,6 +363,12 @@ function tickVoiceFx(voice: Voice): void {
   }
   if (voice.pitchSlide !== 0 && voice.note !== null && voice.active) {
     voice.note = Math.min(127, Math.max(0, voice.note + voice.pitchSlide));
+  }
+  if (voice.chordOffsets && voice.chordOffsets.length > 0 && voice.active) {
+    voice.chordIndex = (voice.chordIndex + 1) % voice.chordOffsets.length;
+  }
+  if (voice.vibratoDepth > 0 && voice.active) {
+    voice.vibratoPhase += 0.6;
   }
   if (voice.retriggerPeriod > 0 && voice.active && voice.note !== null) {
     voice.retriggerAge += 1;
@@ -361,7 +494,7 @@ function gbFrame(song: Song, voices: Voice[]): GbFrame {
       return;
     }
     const frequency = gbFrequency(midi);
-    const duty = (instrument?.duty ?? 2) & 0x03;
+    const duty = (voice.dutyOverride ?? instrument?.duty ?? 2) & 0x03;
     if (prefix === 'nr1') {
       const sweepTime = instrument?.sweepTime ?? 0;
       const sweepShift = instrument?.sweepShift ?? 0;
@@ -501,13 +634,19 @@ export function renderSong(song: Song): RenderedSong {
   const perRow = framesPerRow(song.tempo, definition.frameRate);
   const voices = silentVoices(definition.channels.length);
   const frames: AyFrame[] | GbFrame[] | SidFrame[] | NesFrame[] | FmFrame[] = [];
+  let stopSong = false;
   for (const patternId of song.order) {
+    if (stopSong) {
+      break;
+    }
     const pattern = song.patterns.find((item) => item.id === patternId);
     if (!pattern) {
       continue;
     }
-    for (const row of pattern.rows) {
-      applyRow(voices, row);
+    let rowIndex = 0;
+    while (rowIndex < pattern.rows.length) {
+      const row = pattern.rows[rowIndex];
+      applyRow(voices, row, song.chip);
       for (let tick = 0; tick < perRow; tick += 1) {
         voices.forEach(tickVoiceFx);
         if (isAyChip(song.chip)) {
@@ -521,6 +660,28 @@ export function renderSong(song: Song): RenderedSong {
         } else {
           (frames as GbFrame[]).push(gbFrame(song, voices));
         }
+      }
+      // LSDJ H: hop within the phrase or stop.
+      let hopped = false;
+      for (const voice of voices) {
+        if (voice.hopStep === -1) {
+          stopSong = true;
+          hopped = true;
+          break;
+        }
+        if (voice.hopStep !== null && voice.hopStep >= 0 && voice.hopStep < pattern.rows.length) {
+          rowIndex = voice.hopStep;
+          voice.hopStep = null;
+          hopped = true;
+          break;
+        }
+        voice.hopStep = null;
+      }
+      if (stopSong) {
+        break;
+      }
+      if (!hopped) {
+        rowIndex += 1;
       }
     }
   }

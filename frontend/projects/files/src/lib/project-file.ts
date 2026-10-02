@@ -2,8 +2,13 @@ import {
   LEGACY_PROJECT_VERSION,
   PROJECT_VERSION,
   PROJECT_VERSION_V2,
+  PROJECT_VERSION_V3,
   baseInstrument,
   defaultRoleForKind,
+  effectCmdsForChip,
+  effectValueMax,
+  isEffectCmdForChip,
+  remapLegacySharedEffectForGameboy,
   type Cell,
   type CellEffect,
   type ChipId,
@@ -21,11 +26,11 @@ import {
 const CHIP_IDS: ChipId[] = [
   'gameboy', 'vectrex', 'c64', 'atarist', 'nes', 'genesis', 'pc98', 'x68000',
 ];
-const EFFECT_CMDS = new Set<EffectCmd>(['A', 'U', 'D', 'R', 'C', 'P']);
 const PRESET_ROLES = new Set<PresetRole>(['lead', 'bass', 'percussion', 'pad', 'fx']);
 const INSTRUMENT_KINDS = new Set<InstrumentKind>([
   'pulse', 'wave', 'noise', 'tone', 'snip', 'sid', 'triangle', 'fm',
 ]);
+const SHARED_ONLY = new Set<EffectCmd>(['A', 'U', 'D', 'R', 'C', 'P']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -67,22 +72,27 @@ function normalizeInstruments(raw: unknown[]): Instrument[] {
   return raw.map((item, index) => normalizeInstrument(item, index));
 }
 
-function normalizeEffect(raw: unknown): CellEffect | null {
+function normalizeEffect(raw: unknown, chip: ChipId, legacySharedGb: boolean): CellEffect | null {
   if (!isRecord(raw)) {
     return null;
   }
   const cmd = raw['cmd'];
   const value = raw['value'];
-  if (typeof cmd !== 'string' || !EFFECT_CMDS.has(cmd as EffectCmd)) {
+  if (typeof cmd !== 'string' || typeof value !== 'number' || !Number.isFinite(value)) {
     return null;
   }
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
+  const max = effectValueMax(chip);
+  const clamped = Math.min(max, Math.max(0, Math.floor(value)));
+  if (chip === 'gameboy' && legacySharedGb && SHARED_ONLY.has(cmd as EffectCmd)) {
+    return remapLegacySharedEffectForGameboy({ cmd: cmd as EffectCmd, value: clamped });
+  }
+  if (!isEffectCmdForChip(chip, cmd)) {
     return null;
   }
-  return { cmd: cmd as EffectCmd, value: Math.min(15, Math.max(0, Math.floor(value))) };
+  return { cmd: cmd as EffectCmd, value: clamped };
 }
 
-function normalizeCell(raw: unknown): Cell {
+function normalizeCell(raw: unknown, chip: ChipId, legacySharedGb: boolean): Cell {
   if (!isRecord(raw)) {
     return { note: null, cut: false, instrumentId: null, volume: null, effect: null };
   }
@@ -91,11 +101,11 @@ function normalizeCell(raw: unknown): Cell {
     cut: Boolean(raw['cut']),
     instrumentId: typeof raw['instrumentId'] === 'string' ? raw['instrumentId'] : null,
     volume: typeof raw['volume'] === 'number' ? raw['volume'] : null,
-    effect: normalizeEffect(raw['effect']),
+    effect: normalizeEffect(raw['effect'], chip, legacySharedGb),
   };
 }
 
-function normalizePatterns(patterns: Pattern[]): Pattern[] {
+function normalizePatterns(patterns: Pattern[], chip: ChipId, legacySharedGb: boolean): Pattern[] {
   return patterns.map((pattern, index) => {
     if (!isRecord(pattern as unknown)) {
       return pattern;
@@ -106,13 +116,18 @@ function normalizePatterns(patterns: Pattern[]): Pattern[] {
       : `Pattern ${index + 1}`;
     const rows = Array.isArray(record['rows'])
       ? (record['rows'] as unknown[]).map((row) =>
-          Array.isArray(row) ? row.map((cell) => normalizeCell(cell)) : [])
-      : pattern.rows.map((row) => row.map((cell) => normalizeCell(cell)));
+          Array.isArray(row) ? row.map((cell) => normalizeCell(cell, chip, legacySharedGb)) : [])
+      : pattern.rows.map((row) => row.map((cell) => normalizeCell(cell, chip, legacySharedGb)));
     return { ...pattern, name, rows };
   });
 }
 
-function normalizeSongBody(raw: Record<string, unknown>, index: number): SongBody {
+function normalizeSongBody(
+  raw: Record<string, unknown>,
+  index: number,
+  chip: ChipId,
+  legacySharedGb: boolean,
+): SongBody {
   const id = typeof raw['id'] === 'string' && raw['id'] ? String(raw['id']) : `song-${index + 1}`;
   const name = typeof raw['name'] === 'string' && raw['name'].trim()
     ? String(raw['name']).trim().slice(0, 40)
@@ -131,7 +146,7 @@ function normalizeSongBody(raw: Record<string, unknown>, index: number): SongBod
     name,
     tempo,
     order: order as string[],
-    patterns: normalizePatterns(patterns as Pattern[]),
+    patterns: normalizePatterns(patterns as Pattern[], chip, legacySharedGb),
   };
 }
 
@@ -186,12 +201,13 @@ function migrateV1(parsed: Record<string, unknown>): Project {
   if (!Array.isArray(parsed['order']) || parsed['order'].length === 0) {
     reject('The project has no order.');
   }
+  const legacySharedGb = chip === 'gameboy';
   const body: SongBody = {
     id: 'song-1',
     name: typeof parsed['name'] === 'string' && parsed['name'] ? String(parsed['name']) : 'Song 1',
     tempo: typeof parsed['tempo'] === 'number' ? parsed['tempo'] : 120,
     order: parsed['order'] as string[],
-    patterns: normalizePatterns(parsed['patterns'] as Pattern[]),
+    patterns: normalizePatterns(parsed['patterns'] as Pattern[], chip, legacySharedGb),
   };
   return {
     version: PROJECT_VERSION,
@@ -205,7 +221,11 @@ function migrateV1(parsed: Record<string, unknown>): Project {
   };
 }
 
-function parseProjectBody(parsed: Record<string, unknown>, allowCustom: boolean): Project {
+function parseProjectBody(
+  parsed: Record<string, unknown>,
+  allowCustom: boolean,
+  legacySharedGb: boolean,
+): Project {
   const allowed = new Set([
     'version', 'name', 'chip', 'instruments', 'armedInstrumentId', 'songs', 'activeSongId',
   ]);
@@ -227,11 +247,12 @@ function parseProjectBody(parsed: Record<string, unknown>, allowCustom: boolean)
   if (!Array.isArray(parsed['songs']) || parsed['songs'].length === 0) {
     reject('The project has no songs.');
   }
+  const remap = legacySharedGb && chip === 'gameboy';
   const songs = (parsed['songs'] as unknown[]).map((item, index) => {
     if (!isRecord(item)) {
       reject('Invalid song entry.');
     }
-    return normalizeSongBody(item, index);
+    return normalizeSongBody(item, index, chip, remap);
   });
   const activeSongId = typeof parsed['activeSongId'] === 'string' && songs.some((song) => song.id === parsed['activeSongId'])
     ? String(parsed['activeSongId'])
@@ -272,15 +293,20 @@ export function parseProject(raw: string): Project {
     return migrateV1(parsed);
   }
   if (version === PROJECT_VERSION_V2) {
-    return parseProjectBody(parsed, false);
+    return parseProjectBody(parsed, false, true);
+  }
+  if (version === PROJECT_VERSION_V3) {
+    return parseProjectBody(parsed, true, true);
   }
   if (version !== PROJECT_VERSION) {
     reject('Unsupported project version.');
   }
-  const project = parseProjectBody(parsed, true);
+  const project = parseProjectBody(parsed, true, false);
   if (!CHIP_IDS.includes(project.chip)) {
     reject('Unknown chip.');
   }
+  // Touch effectCmdsForChip so tree-shaking keeps the helper available to callers.
+  void effectCmdsForChip(project.chip);
   return project;
 }
 

@@ -9,10 +9,12 @@ export { encodeYm6, parseYm, type ParsedYm } from './lib/ym6';
 export { encodeVgm } from './lib/vgm';
 export { a4Hz, a4Period, encodeWav, renderPcm } from './lib/pcm';
 export { AkyUnsupportedError, encodeAky } from './lib/aky';
+export { encodeLsdjSav, LSDJ_SAV_SIZE } from './lib/lsdj-sav';
 
 import { renderSong } from '@chippy/engines';
 import { chipDefinition, type Song } from '@chippy/domain';
 import { encodeAky } from './lib/aky';
+import { encodeLsdjSav } from './lib/lsdj-sav';
 import { renderPcm, encodeWav } from './lib/pcm';
 import { encodeVgm } from './lib/vgm';
 import { encodeYm6 } from './lib/ym6';
@@ -57,6 +59,14 @@ export function exportVgm(song: Song): ExportBundle {
   return {
     filename: `${safe(song.name)}.vgm`,
     bytes: encodeVgm(rendered.frames, song.name),
+    mime: 'application/octet-stream',
+  };
+}
+
+export function exportLsdjSav(song: Song): ExportBundle {
+  return {
+    filename: `${safe(song.name)}.sav`,
+    bytes: encodeLsdjSav(song),
     mime: 'application/octet-stream',
   };
 }

@@ -350,7 +350,7 @@ describe('renderSong', () => {
     const cutSong = songForRender(cut.project);
     cutSong.patterns[0].rows[0][0] = {
       ...cutSong.patterns[0].rows[0][0],
-      effect: { cmd: 'C', value: 1 },
+      effect: { cmd: 'K', value: 1 },
     };
     const cutRendered = renderSong(cutSong);
     expect(cutRendered.chip).toBe('gameboy');
@@ -363,7 +363,7 @@ describe('renderSong', () => {
     const cutNowSong = songForRender(cutNow.project);
     cutNowSong.patterns[0].rows[0][0] = {
       ...cutNowSong.patterns[0].rows[0][0],
-      effect: { cmd: 'C', value: 0 },
+      effect: { cmd: 'K', value: 0 },
     };
     const cutNowRendered = renderSong(cutNowSong);
     expect(cutNowRendered.chip).toBe('gameboy');

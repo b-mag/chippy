@@ -21,9 +21,11 @@ import {
   findInstrumentIdByNumberLabel,
   fmAlgorithmRouting,
   fmFieldValue,
+  effectCmdsForChip,
   formatEffect,
   formatNote,
   isChipId,
+  isEffectCmdForChip,
   isFmChip,
   isFmPatchFieldKey,
   kindAllowedOnChannel,
@@ -233,6 +235,7 @@ export class TrackerComponent {
       return [
         { id: 'wav' as const, label: 'WAV' },
         { id: 'vgm' as const, label: 'VGM' },
+        { id: 'sav' as const, label: 'LSDJ SAV' },
       ];
     }
     if (chip === 'c64' || chip === 'nes' || isFmChip(chip)) {
@@ -331,7 +334,7 @@ export class TrackerComponent {
       return this.instrumentNumberLabel(cell.instrumentId);
     }
     if (column === 'effect') {
-      return formatEffect(cell.effect);
+      return formatEffect(cell.effect, this.project().chip);
     }
     return cell.volume === null ? '..' : cell.volume.toString(16).toUpperCase();
   }
@@ -810,7 +813,7 @@ export class TrackerComponent {
     }
   }
 
-  async exportFile(kind: 'wav' | 'ym' | 'vgm' | 'aky'): Promise<void> {
+  async exportFile(kind: 'wav' | 'ym' | 'vgm' | 'aky' | 'sav'): Promise<void> {
     this.exportOpen.set(false);
     try {
       const files = await import('@chippy/files');
@@ -819,6 +822,7 @@ export class TrackerComponent {
       const bundles = kind === 'wav' ? [files.exportWav(song)]
         : kind === 'ym' ? [files.exportYm(song)]
         : kind === 'vgm' ? [files.exportVgm(song)]
+        : kind === 'sav' ? [files.exportLsdjSav(song)]
         : [aky!.songFile, aky!.configFile];
       bundles.forEach((bundle) => this.download(bundle.bytes, bundle.filename, bundle.mime));
       this.status.set('Export ready.');
@@ -854,17 +858,26 @@ export class TrackerComponent {
   }
 
   private enterEffectKey(key: string): void {
+    const chip = this.project().chip;
     const upper = key.toUpperCase();
     const pattern = this.pattern();
     const cursor = this.state().cursor;
     const existing = pattern.rows[cursor.row][cursor.channel]?.effect ?? null;
-    if (upper === 'A' || upper === 'U' || upper === 'D' || upper === 'R' || upper === 'C' || upper === 'P') {
+    const cmds = effectCmdsForChip(chip);
+    if (isEffectCmdForChip(chip, upper)) {
       this.session.effect({ cmd: upper as EffectCmd, value: existing?.value ?? 0 });
       return;
     }
     if (/^[0-9a-f]$/i.test(key)) {
-      const value = parseInt(key, 16);
-      this.session.effect({ cmd: existing?.cmd ?? 'A', value });
+      const nibble = parseInt(key, 16);
+      const fallbackCmd = (cmds[0] ?? 'A') as EffectCmd;
+      const cmd = existing?.cmd && isEffectCmdForChip(chip, existing.cmd) ? existing.cmd : fallbackCmd;
+      if (chip === 'gameboy') {
+        const value = (((existing?.value ?? 0) << 4) | nibble) & 0xff;
+        this.session.effect({ cmd, value });
+      } else {
+        this.session.effect({ cmd, value: nibble });
+      }
     }
   }
 

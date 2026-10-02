@@ -24,6 +24,8 @@ import {
 import {
   PATTERN_ROWS,
   PROJECT_VERSION,
+  effectCmdsForChip,
+  effectValueMax,
   type Cell,
   type CellEffect,
   type ChipId,
@@ -340,7 +342,21 @@ export function setEffect(state: SessionState, effect: CellEffect | null): Sessi
   const body = activeSongBody(state.project);
   const pattern = currentPattern(body, state.cursor);
   const existing = pattern.rows[state.cursor.row][state.cursor.channel];
-  return writeCell(state, { ...existing, effect, volume: existing.volume ?? null }, true);
+  let nextEffect = effect;
+  if (nextEffect) {
+    const chip = state.project.chip;
+    const cmds = effectCmdsForChip(chip);
+    const max = effectValueMax(chip);
+    if (!cmds.includes(nextEffect.cmd)) {
+      nextEffect = null;
+    } else {
+      nextEffect = {
+        cmd: nextEffect.cmd,
+        value: Math.min(max, Math.max(0, Math.floor(nextEffect.value))),
+      };
+    }
+  }
+  return writeCell(state, { ...existing, effect: nextEffect, volume: existing.volume ?? null }, true);
 }
 
 /** Assign an instrument to the current cell (tracker instrument column). */

@@ -2,12 +2,15 @@
 export const PATTERN_ROWS = 16;
 
 /** Version of the `.chippy.json` document. Unknown versions are rejected. */
-export const PROJECT_VERSION = 3;
+export const PROJECT_VERSION = 4;
 
-/** Flat multi-song project version still accepted on open and migrated to v3. */
+/** v3 projects (customPresets) still accepted on open and migrated to v4. */
+export const PROJECT_VERSION_V3 = 3;
+
+/** Flat multi-song project version still accepted on open and migrated to v4. */
 export const PROJECT_VERSION_V2 = 2;
 
-/** Legacy flat-document version still accepted on open and migrated to v3. */
+/** Legacy flat-document version still accepted on open and migrated to v4. */
 export const LEGACY_PROJECT_VERSION = 1;
 
 /** Musical role used to group presets in the instrument studio. */
@@ -26,19 +29,35 @@ export type ChipId =
 export type ColumnId = 'note' | 'instrument' | 'volume' | 'effect';
 
 /**
- * Shared FX commands (common-denominator tracker column).
- * Engines that do not implement a command ignore it.
- * - A: volume slide down by `value` each frame (0-15)
- * - U: volume slide up by `value` each frame (0-15)
- * - D: delay note onset by `value` frames into the row (0-15)
- * - R: retrigger / re-gate every `value` frames (1-15)
- * - C: cut note after `value` frames (0 = cut on the first tick)
- * - P: pitch slide; each frame nudge MIDI by `((value & 0x0f) - 8)` (8 = hold)
+ * Tracker FX command letter.
+ * Non-Game-Boy chips use the shared subset (see SHARED_EFFECT_CMDS).
+ * Game Boy uses the LSDJ phrase command set (see LSDJ_EFFECT_CMDS).
  */
-export type EffectCmd = 'A' | 'U' | 'D' | 'R' | 'C' | 'P';
+export type EffectCmd =
+  | 'A'
+  | 'B'
+  | 'C'
+  | 'D'
+  | 'E'
+  | 'F'
+  | 'G'
+  | 'H'
+  | 'K'
+  | 'L'
+  | 'M'
+  | 'O'
+  | 'P'
+  | 'R'
+  | 'S'
+  | 'T'
+  | 'U'
+  | 'V'
+  | 'W'
+  | 'Z';
 
 export interface CellEffect {
   cmd: EffectCmd;
+  /** 0-15 on shared chips; 0-255 (hex byte) on Game Boy / LSDJ. */
   value: number;
 }
 
@@ -250,11 +269,71 @@ export interface Cursor {
   column: ColumnId;
 }
 
-export const EFFECT_CMDS: EffectCmd[] = ['A', 'U', 'D', 'R', 'C', 'P'];
+/**
+ * Shared FX (common-denominator tracker column).
+ * - A: volume slide down by `value` each frame (0-15)
+ * - U: volume slide up by `value` each frame (0-15)
+ * - D: delay note onset by `value` frames into the row (0-15)
+ * - R: retrigger / re-gate every `value` frames (1-15)
+ * - C: cut note after `value` frames (0 = cut on the first tick)
+ * - P: pitch slide; each frame nudge MIDI by `((value & 0x0f) - 8)` (8 = hold)
+ */
+export const SHARED_EFFECT_CMDS: EffectCmd[] = ['A', 'U', 'D', 'R', 'C', 'P'];
 
-export function formatEffect(effect: CellEffect | null): string {
+/** LSDJ phrase commands (Game Boy). Values are full bytes 00-FF. */
+export const LSDJ_EFFECT_CMDS: EffectCmd[] = [
+  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'K', 'L', 'M', 'O', 'P', 'R', 'S', 'T', 'V', 'W', 'Z',
+];
+
+/** @deprecated Prefer SHARED_EFFECT_CMDS or effectCmdsForChip. */
+export const EFFECT_CMDS: EffectCmd[] = SHARED_EFFECT_CMDS;
+
+export function effectCmdsForChip(chip: ChipId): readonly EffectCmd[] {
+  return chip === 'gameboy' ? LSDJ_EFFECT_CMDS : SHARED_EFFECT_CMDS;
+}
+
+export function effectValueMax(chip: ChipId): number {
+  return chip === 'gameboy' ? 255 : 15;
+}
+
+export function isEffectCmdForChip(chip: ChipId, cmd: string): cmd is EffectCmd {
+  return (effectCmdsForChip(chip) as readonly string[]).includes(cmd);
+}
+
+/**
+ * Map pre-LSDJ shared Game Boy FX onto LSDJ commands.
+ * Used when loading older Chippy GB projects that only had A/U/D/R/C/P.
+ */
+export function remapLegacySharedEffectForGameboy(effect: CellEffect): CellEffect | null {
+  const value = Math.min(15, Math.max(0, effect.value | 0));
+  switch (effect.cmd) {
+    case 'C':
+      return { cmd: 'K', value };
+    case 'D':
+    case 'R':
+      return { cmd: effect.cmd, value };
+    case 'P':
+      // Old nibble 8 = hold; LSDJ P is a signed-ish bend speed — keep low nibble.
+      return { cmd: 'P', value };
+    case 'A':
+      // Volume slide down → falling envelope (approx).
+      return { cmd: 'E', value: 0xa0 | (value & 0x07) };
+    case 'U':
+      // Volume slide up → rising envelope (approx).
+      return { cmd: 'E', value: 0x88 | (value & 0x07) };
+    default:
+      return isEffectCmdForChip('gameboy', effect.cmd)
+        ? { cmd: effect.cmd, value: Math.min(255, Math.max(0, effect.value | 0)) }
+        : null;
+  }
+}
+
+export function formatEffect(effect: CellEffect | null, chip?: ChipId): string {
   if (!effect) {
-    return '..';
+    return chip === 'gameboy' ? '...' : '..';
+  }
+  if (chip === 'gameboy' || effect.value > 15) {
+    return `${effect.cmd}${effect.value.toString(16).toUpperCase().padStart(2, '0')}`;
   }
   return `${effect.cmd}${effect.value.toString(16).toUpperCase()}`;
 }
