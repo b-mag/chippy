@@ -1,4 +1,16 @@
-import type { Cell, EffectCmd, Instrument, Song } from '@chippy/domain';
+import {
+  baseInstrument,
+  emptyCell,
+  PATTERN_ROWS,
+  PROJECT_VERSION,
+  type Cell,
+  type EffectCmd,
+  type Instrument,
+  type InstrumentKind,
+  type Pattern,
+  type Project,
+  type Song,
+} from '@chippy/domain';
 import { WAVEFORMS } from '@chippy/engines';
 import { createEmptyLsdjSong } from './lsdj-empty-song';
 
@@ -65,6 +77,34 @@ const LSDJ_CMD_BYTE: Record<EffectCmd, number> = {
   B: 23,
   U: 0, // not an LSDJ command; should not appear after remap
 };
+
+const LSDJ_BYTE_TO_CMD: Record<number, EffectCmd> = {
+  1: 'A',
+  2: 'C',
+  3: 'D',
+  4: 'E',
+  5: 'F',
+  6: 'G',
+  7: 'H',
+  8: 'K',
+  9: 'L',
+  10: 'M',
+  11: 'O',
+  12: 'P',
+  13: 'R',
+  14: 'S',
+  15: 'T',
+  16: 'V',
+  17: 'W',
+  18: 'Z',
+  23: 'B',
+};
+
+/** Result of opening an LSDJ `.sav` into Chippy's flat Song model. */
+export interface LsdjDecodeResult {
+  song: Song;
+  warnings: string[];
+}
 
 function setBit(table: Uint8Array, index: number): void {
   table[index >> 3] |= 1 << (index & 7);
@@ -320,4 +360,341 @@ export function encodeLsdjSav(song: Song): Uint8Array {
   sav.set(songBytes, 0);
   sav.set(buildFileMemory(), SONG_SIZE);
   return sav;
+}
+
+function readName(source: Uint8Array, offset: number, length: number): string {
+  let end = offset;
+  const limit = offset + length;
+  while (end < limit && source[end] !== 0) {
+    end += 1;
+  }
+  const raw = new TextDecoder().decode(source.subarray(offset, end)).trim();
+  return raw.replace(/[^\x20-\x7E]/g, '') || 'INST';
+}
+
+function signedByte(value: number): number {
+  return value > 127 ? value - 256 : value;
+}
+
+function readTempo(song: Uint8Array): number {
+  const raw = song[OFF.tempo];
+  const bpm = raw < 40 ? raw + 256 : raw;
+  return Math.min(295, Math.max(40, bpm));
+}
+
+function readPulseFields(bytes: Uint8Array): Partial<Instrument> {
+  const env = bytes[1];
+  const sweep = bytes[4];
+  const duty = ((bytes[7] >> 6) & 3) as 0 | 1 | 2 | 3;
+  return {
+    kind: 'pulse',
+    envelopeStart: (env >> 4) & 0x0f,
+    envelopeDown: ((env >> 3) & 1) === 0,
+    envelopePeriod: env & 0x07,
+    sweepTime: sweep === 0xff ? 0 : (sweep >> 4) & 7,
+    sweepDown: sweep === 0xff ? true : ((sweep >> 3) & 1) === 1,
+    sweepShift: sweep === 0xff ? 0 : sweep & 7,
+    duty,
+  };
+}
+
+function readWaveFields(bytes: Uint8Array): Partial<Instrument> {
+  const waveVol = (bytes[1] >> 5) & 3;
+  const envelopeStart = waveVol === 3 ? 15 : waveVol === 2 ? 10 : waveVol === 1 ? 5 : 0;
+  return {
+    kind: 'wave',
+    envelopeStart,
+    envelopeDown: false,
+    envelopePeriod: 0,
+    waveform: bytes[3] & 0x0f,
+  };
+}
+
+function readNoiseFields(bytes: Uint8Array): Partial<Instrument> {
+  const env = bytes[1];
+  return {
+    kind: 'noise',
+    envelopeStart: (env >> 4) & 0x0f,
+    envelopeDown: ((env >> 3) & 1) === 0,
+    envelopePeriod: env & 0x07,
+    noiseShort: bytes[2] !== 0,
+  };
+}
+
+function readInstruments(song: Uint8Array, warnings: string[]): Instrument[] {
+  const instruments: Instrument[] = [];
+  let sawKit = false;
+  let sawTable = false;
+  for (let index = 0; index < MAX_INSTRUMENTS; index += 1) {
+    if (song[OFF.instrAlloc + index] !== 1) {
+      continue;
+    }
+    const bytes = song.subarray(OFF.instruments + index * 16, OFF.instruments + index * 16 + 16);
+    const name = readName(song, OFF.instrumentNames + index * 5, 5);
+    const type = bytes[0];
+    if ((bytes[6] & 0x20) !== 0) {
+      sawTable = true;
+    }
+    let kind: InstrumentKind = 'pulse';
+    let fields: Partial<Instrument> = {};
+    if (type === 1) {
+      kind = 'wave';
+      fields = readWaveFields(bytes);
+    } else if (type === 3) {
+      kind = 'noise';
+      fields = readNoiseFields(bytes);
+    } else if (type === 2) {
+      sawKit = true;
+      kind = 'pulse';
+      fields = { ...readPulseFields(bytes), kind: 'pulse' };
+    } else if (type === 0) {
+      fields = readPulseFields(bytes);
+    } else {
+      warnings.push(`Instrument ${index} has unsupported type ${type}; imported as pulse.`);
+      fields = readPulseFields(bytes);
+    }
+    instruments.push(
+      baseInstrument({
+        id: `ins-${index + 1}`,
+        name: name.slice(0, 40),
+        kind,
+        ...fields,
+      }),
+    );
+  }
+  if (sawKit) {
+    warnings.push('Kit instruments are not in Chippy yet; kit slots were imported as pulse.');
+  }
+  if (sawTable) {
+    warnings.push('Tables are not in Chippy yet; table links on instruments were ignored.');
+  }
+  if (instruments.length === 0) {
+    instruments.push(baseInstrument({ id: 'ins-1', name: 'Pulse', kind: 'pulse' }));
+  }
+  return instruments;
+}
+
+function instrumentIdForIndex(instruments: Instrument[], index: number): string | null {
+  if (index === NO_INSTRUMENT) {
+    return null;
+  }
+  const match = instruments.find((item) => item.id === `ins-${index + 1}`);
+  return match?.id ?? instruments[0]?.id ?? null;
+}
+
+function readPhraseCells(
+  song: Uint8Array,
+  phrase: number,
+  transpose: number,
+  instruments: Instrument[],
+  unknownCmds: Set<number>,
+): Cell[] {
+  const cells: Cell[] = [];
+  for (let step = 0; step < PHRASE_LENGTH; step += 1) {
+    const noteRaw = song[OFF.phraseNotes + phrase * PHRASE_LENGTH + step];
+    const instrRaw = song[OFF.phraseInstruments + phrase * PHRASE_LENGTH + step];
+    const cmdByte = song[OFF.phraseCommands + phrase * PHRASE_LENGTH + step];
+    const value = song[OFF.phraseCommandValues + phrase * PHRASE_LENGTH + step];
+    const cmd = cmdByte === 0 ? null : LSDJ_BYTE_TO_CMD[cmdByte] ?? null;
+    if (cmdByte !== 0 && !cmd) {
+      unknownCmds.add(cmdByte);
+    }
+    const cut = cmd === 'K' && noteRaw === NO_NOTE;
+    let note: number | null = null;
+    if (!cut && noteRaw !== NO_NOTE) {
+      note = Math.min(127, Math.max(1, noteRaw + transpose));
+    }
+    let effect: Cell['effect'] = null;
+    if (cmd && !cut) {
+      effect = { cmd, value: value & 0xff };
+    }
+    cells.push({
+      note,
+      cut,
+      instrumentId: note !== null ? instrumentIdForIndex(instruments, instrRaw) : null,
+      volume: null,
+      effect,
+    });
+  }
+  return cells;
+}
+
+interface PhraseRef {
+  phrase: number;
+  transpose: number;
+}
+
+function expandChannelPhrases(song: Uint8Array, channel: number): PhraseRef[] {
+  const list: PhraseRef[] = [];
+  for (let row = 0; row < MAX_SEQUENCE_ROWS; row += 1) {
+    const chain = song[OFF.sequence + row * 4 + channel];
+    if (chain === NO_CHAIN) {
+      break;
+    }
+    if (chain >= MAX_CHAINS) {
+      continue;
+    }
+    for (let step = 0; step < CHAIN_LENGTH; step += 1) {
+      const phrase = song[OFF.chainPhrases + chain * CHAIN_LENGTH + step];
+      if (phrase === NO_PHRASE) {
+        break;
+      }
+      if (phrase >= MAX_PHRASES) {
+        continue;
+      }
+      list.push({
+        phrase,
+        transpose: signedByte(song[OFF.chainTransposes + chain * CHAIN_LENGTH + step]),
+      });
+    }
+  }
+  return list;
+}
+
+function groovesAreDefault(song: Uint8Array): boolean {
+  // Groove 0 default ticks 6,6 then zeros; other grooves typically unused (zeros).
+  if (song[OFF.grooves] !== 6 || song[OFF.grooves + 1] !== 6) {
+    return false;
+  }
+  for (let i = 2; i < 16 * 16; i += 1) {
+    if (song[OFF.grooves + i] !== 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function fileSlotsLookUsed(sav: Uint8Array): boolean {
+  if (sav.length < LSDJ_SAV_SIZE) {
+    return false;
+  }
+  const file = sav.subarray(SONG_SIZE);
+  for (let project = 0; project < PROJECT_COUNT; project += 1) {
+    const base = project * PROJECT_NAME_LENGTH;
+    for (let i = 0; i < PROJECT_NAME_LENGTH; i += 1) {
+      if (file[base + i] !== 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Flatten an LSDJ 128 KiB `.sav` work song into Chippy's Game Boy Song
+ * (chains → unique patterns in Song Order). Unsupported structures become warnings.
+ */
+export function decodeLsdjSav(bytes: Uint8Array): LsdjDecodeResult {
+  if (bytes.length !== LSDJ_SAV_SIZE) {
+    throw new Error(`LSDJ .sav must be ${LSDJ_SAV_SIZE} bytes (got ${bytes.length}).`);
+  }
+  const songBytes = bytes.subarray(0, SONG_SIZE);
+  const warnings: string[] = [];
+
+  if (
+    songBytes[OFF.rb1] !== 0x72 || songBytes[OFF.rb1 + 1] !== 0x62
+    || songBytes[OFF.rb2] !== 0x72 || songBytes[OFF.rb2 + 1] !== 0x62
+    || songBytes[OFF.rb3] !== 0x72 || songBytes[OFF.rb3 + 1] !== 0x62
+  ) {
+    warnings.push('Work-song init markers look unusual; import may be incomplete.');
+  }
+
+  const instruments = readInstruments(songBytes, warnings);
+  if (!groovesAreDefault(songBytes)) {
+    warnings.push('Grooves are not in Chippy yet; non-default grooves were ignored.');
+  }
+  if (fileSlotsLookUsed(bytes)) {
+    warnings.push('File slots / .lsdsng projects in the upper 96KB were not imported.');
+  }
+
+  const channelPhrases = [0, 1, 2, 3].map((channel) => expandChannelPhrases(songBytes, channel));
+  const orderLength = Math.max(1, ...channelPhrases.map((list) => list.length));
+  const seenPhrases = new Set<number>();
+  let sharedPhrase = false;
+  let nonZeroTranspose = false;
+  const unknownCmds = new Set<number>();
+
+  const patterns: Pattern[] = [];
+  const order: string[] = [];
+  for (let index = 0; index < orderLength; index += 1) {
+    const id = `pat-${index + 1}`;
+    const pattern: Pattern = {
+      id,
+      name: `Pattern ${index + 1}`,
+      rows: Array.from({ length: PATTERN_ROWS }, () => Array.from({ length: 4 }, () => emptyCell())),
+    };
+    for (let channel = 0; channel < 4; channel += 1) {
+      const ref = channelPhrases[channel][index];
+      if (!ref) {
+        continue;
+      }
+      if (seenPhrases.has(ref.phrase)) {
+        sharedPhrase = true;
+      }
+      seenPhrases.add(ref.phrase);
+      if (ref.transpose !== 0) {
+        nonZeroTranspose = true;
+      }
+      const cells = readPhraseCells(
+        songBytes,
+        ref.phrase,
+        ref.transpose,
+        instruments,
+        unknownCmds,
+      );
+      for (let row = 0; row < PHRASE_LENGTH; row += 1) {
+        pattern.rows[row][channel] = cells[row] ?? emptyCell();
+      }
+    }
+    patterns.push(pattern);
+    order.push(id);
+  }
+
+  if (sharedPhrase) {
+    warnings.push('Shared phrases were expanded into unique patterns (chain hierarchy is flattened).');
+  }
+  if (nonZeroTranspose) {
+    warnings.push('Chain transpose was baked into notes; re-export will not restore transpose.');
+  }
+  if (unknownCmds.size > 0) {
+    warnings.push(
+      `Unknown phrase command byte(s) skipped: ${[...unknownCmds].map((b) => b.toString(16).padStart(2, '0')).join(', ')}.`,
+    );
+  }
+  warnings.push('Tables, kits, speech, and softsynth details are not imported yet.');
+
+  // Deduplicate the always-on catch-all if nothing else was flagged about those areas.
+  const uniqueWarnings = [...new Set(warnings)];
+
+  const song: Song = {
+    name: 'LSDJ Import',
+    chip: 'gameboy',
+    tempo: readTempo(songBytes),
+    order,
+    patterns,
+    instruments,
+    armedInstrumentId: instruments[0].id,
+  };
+  return { song, warnings: uniqueWarnings };
+}
+
+/** Wrap a decoded LSDJ song into a Chippy Project for session.load. */
+export function projectFromLsdjDecode(result: LsdjDecodeResult, projectName = 'LSDJ Import'): Project {
+  const body = {
+    id: 'song-1',
+    name: result.song.name,
+    tempo: result.song.tempo,
+    order: result.song.order,
+    patterns: result.song.patterns,
+  };
+  return {
+    version: PROJECT_VERSION,
+    name: projectName,
+    chip: 'gameboy',
+    instruments: result.song.instruments,
+    armedInstrumentId: result.song.armedInstrumentId,
+    songs: [body],
+    activeSongId: body.id,
+    customPresets: [],
+  };
 }

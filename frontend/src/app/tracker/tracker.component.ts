@@ -55,6 +55,17 @@ import { RadioPlayerService } from '../radio/radio-player.service';
 import { SessionService } from '../session.service';
 import { SupportEntitlementService } from '../support-entitlement.service';
 
+function detectMobileTracker(): boolean {
+  if (typeof navigator === 'undefined' || typeof window === 'undefined') {
+    return false;
+  }
+  const ua = navigator.userAgent || '';
+  const uaMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(ua);
+  const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+  const narrow = typeof matchMedia === 'function' && matchMedia('(max-width: 768px)').matches;
+  return uaMobile || (coarse && narrow);
+}
+
 @Component({
   selector: 'app-tracker',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -68,6 +79,8 @@ export class TrackerComponent {
   private readonly playback = inject(PlaybackService);
   private readonly radio = inject(RadioPlayerService);
   private readonly entitlement = inject(SupportEntitlementService);
+  /** Mobile browsers get a desktop-only message instead of tracker controls. */
+  readonly mobileTrackerBlocked = signal(detectMobileTracker());
   private readonly renameInput = viewChild<ElementRef<HTMLInputElement>>('renameInput');
   private readonly instrumentDialog = viewChild<ElementRef<HTMLElement>>('instrumentDialog');
   private readonly openProjectInput = viewChild<ElementRef<HTMLInputElement>>('openProjectInput');
@@ -830,8 +843,22 @@ export class TrackerComponent {
       }
     }
     try {
-      const text = await file.text();
       const files = await import('@chippy/files');
+      const isSav = /\.sav$/i.test(file.name);
+      if (isSav) {
+        const buffer = new Uint8Array(await file.arrayBuffer());
+        const decoded = files.decodeLsdjSav(buffer);
+        const projectName = file.name.replace(/\.sav$/i, '') || 'LSDJ Import';
+        const project = files.projectFromLsdjDecode(decoded, projectName);
+        this.playback.stop();
+        this.session.load(project);
+        const detail = decoded.warnings.length > 0
+          ? ` ${decoded.warnings.join(' ')}`
+          : '';
+        this.status.set(`Opened LSDJ .sav (Game Boy). Chains flattened into Song Order.${detail}`);
+        return;
+      }
+      const text = await file.text();
       const project = files.parseProject(text);
       this.playback.stop();
       this.session.load(project);

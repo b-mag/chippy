@@ -1,3 +1,8 @@
+@if (mobileTrackerBlocked()) {
+  <div class="mobile-tracker-gate" role="status">
+    <p>This tracker is designed for desktops, let Brandon know if you really want a mobile version</p>
+  </div>
+} @else {
 <div class="workspace" (keydown)="onKey($event)" tabindex="0">
   <header class="top">
     <div class="top-left">
@@ -38,7 +43,7 @@
         #openProjectInput
         class="open-project-input"
         type="file"
-        accept=".json,application/json"
+        accept=".json,.sav,application/json,application/octet-stream"
         (change)="onOpenProjectSelected($event)" />
       <div class="export-wrap">
         <button type="button" (click)="toggleExport($event)">Export</button>
@@ -156,15 +161,15 @@
           @if (channel.placeholder) {
             <span class="channel-soon" [title]="channel.placeholderNote">not wired up yet</span>
           } @else {
+            <span class="channel-toggles">
+              <button type="button" class="btn-mute" title="Mute this channel during playback" (click)="toggleChannel('mute', index)">{{ muted().has(index) ? 'Unmute' : 'Mute' }}</button>
+              <button type="button" class="btn-solo" title="Solo this channel (others silent)" (click)="toggleChannel('solo', index)">{{ solo().has(index) ? 'Unsolo' : 'Solo' }}</button>
+            </span>
             <span class="column-keys" aria-hidden="true">
               <span title="Note: piano keys write a pitch. ` or ~ = note cut (OFF).">N</span>
               <span title="Instrument: type 1–9 (or the panel number) to assign that instrument. 0 clears.">I</span>
               <span title="Volume: hex 0–F. Empty (..) keeps the instrument’s own level.">V</span>
               <span [title]="effectColumnTitle()">FX</span>
-            </span>
-            <span class="channel-toggles">
-              <button type="button" class="btn-mute" title="Mute this channel during playback" (click)="toggleChannel('mute', index)">{{ muted().has(index) ? 'Unmute' : 'Mute' }}</button>
-              <button type="button" class="btn-solo" title="Solo this channel (others silent)" (click)="toggleChannel('solo', index)">{{ solo().has(index) ? 'Unsolo' : 'Solo' }}</button>
             </span>
           }
         </span>
@@ -481,3 +486,4 @@
   <p class="hint">Z through M play notes. Q through U is the next octave. Arrows move. Backtick cuts the note. Space plays. Ctrl+Z undoes. Ctrl+Y or Ctrl+Shift+Z redoes. Octave {{ state().octave }}.@if (isGameBoy()) { ? toggles LSDJ FX.}</p>
   <p class="status" role="status">{{ status() }}</p>
 </div>
+}

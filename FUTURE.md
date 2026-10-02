@@ -4,7 +4,9 @@ Ideas parked so the tracker stays a common-denominator Order → Patterns editor
 
 ## Mobile web tracker
 
-Make Chippy work well in a phone browser (LSDJ-on-Game-Boy energy on the device you already carry):
+The Tracker tab is **desktop-only** for now: mobile browsers see a message and no tracker controls (Radio and other tabs still work).
+
+A real mobile tracker remains backlog if Brandon wants it later:
 
 - Touch-sized targets and portrait-friendly layout
 - No hover-only controls
@@ -14,28 +16,23 @@ Make Chippy work well in a phone browser (LSDJ-on-Game-Boy energy on the device 
 
 ## LSDJ gaps
 
-Game Boy mode already ships **LSDJ phrase FX** and **`.sav` export** (synthetic chains from flat Song Order). The niche that cares most is people who already write on a physical Game Boy + flash cart and want Chippy as a second editor.
+Game Boy mode ships **LSDJ phrase FX**, **`.sav` export** (synthetic chains from flat Song Order), and **`.sav` import** that flattens chains → Song Order (lossy for shared phrases / transpose). The niche that cares most is people who already write on a physical Game Boy + flash cart and want Chippy as a second editor.
 
-### Flagship follow-up: import `.sav` (Game Boy only)
+### Next / in progress
 
-Open an LSDJ `.sav` (work memory and, where present, file slots / projects) exclusively for Game Boy, and populate Chippy with as much of that song as the app can represent.
-
-- Round-trip: compose on cart → dump `.sav` → edit in Chippy → export `.sav` back to cart (and the reverse).
-- Map notes, instruments, phrase FX, tempo, and chain→order/pattern views as the model allows.
-- As Chains / tables / grooves / kits / speech land, import should grow to fill those structures instead of dropping data.
-- UI: Game Boy–only import path; clear messaging when a feature in the file has no Chippy home yet.
+Import is the flagship path: open a cart dump, edit what Chippy can represent, export `.sav` back. Remaining work below deepens fidelity so less data is dropped.
 
 ### Then burn down
 
-1. **Chains UI** — real chain/phrase hierarchy (import + edit, not only synthetic export)
+1. **Chains UI** — real chain/phrase hierarchy (import + edit, not only synthetic export / flattened import)
 2. **Tables** — editor + alloc; unlocks `A` and table-driven timbre from imported saves
 3. **Grooves** — beyond default `6,6`; unlocks `G` from imported saves
 4. **Synth / wave frames** — softsynth + wave bank; deeper `F` / wave instruments from saves
 5. **Kit instruments** — kits, kit note names, kit-specific `S`
 6. **Speech instrument** — words / allophones
 7. **File slots / `.lsdsng`** — read/write compressed projects in the upper 96KB; multi-song from one cart dump
-8. **Arduinoboy commands** — `N` `X` `Q` `Y` if wanted for sync/hardware users
-9. **Engine preview gaps** — keep honest any phrase command that exports/imports but is still approximate in Web Audio (`A` / `G` / deep `F` today)
+8. **Arduinoboy commands** — **Ask Brandon before implementing.** Do not add `N` / `X` / `Q` / `Y` until he confirms he wants sync/hardware support.
+9. **Engine preview gaps** — keep honest any phrase command that exports/imports but is still approximate in Web Audio (`A` / `G` / deep `F` today; `B` vibrato semantics)
 10. **Format version targeting** — verify empty-song / import against current LSDJ 9.x ROMs; bump template as needed
 11. **Preserve unknown bytes** — on import→edit→export, avoid clobbering unsupported regions when possible
 
@@ -55,7 +52,7 @@ Replace auth stubs so donors get ad-free sessions and premium presets without `p
 
 ## Tracker consistency wins
 
-Shipped: richer shared FX on non-GB chips, Game Boy LSDJ FX + `.sav` export, Radio reconnect, CORS-gated viz, Rainwave now-playing.
+Shipped: richer shared FX on non-GB chips, Game Boy LSDJ FX + `.sav` export/import, Radio reconnect, CORS-gated viz, Rainwave now-playing.
 
 Still open:
 

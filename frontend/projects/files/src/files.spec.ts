@@ -4,6 +4,7 @@ import { renderSong, type AyFrame, type GbFrame } from '@chippy/engines';
 import {
   a4Hz,
   a4Period,
+  decodeLsdjSav,
   downloadName,
   encodeLsdjSav,
   encodeYm6,
@@ -17,11 +18,13 @@ import {
   parseInstrumentFile,
   parseProject,
   parseYm,
+  projectFromLsdjDecode,
   renderPcm,
   serializeInstrumentFile,
   serializeProject,
   unwrapYmPayload,
 } from '@chippy/files';
+import { createEmptyLsdjSong } from './lib/lsdj-empty-song';
 
 describe('project file', () => {
   it('round-trips a project, migrates v1, and rejects unknown fields', () => {
@@ -217,6 +220,52 @@ describe('export helpers', () => {
     expect(bytes[0x1292]).toBe(2);
     expect(bytes[0x1293]).toBe(3);
     expect(() => exportLsdjSav(songForRender(newSession('vectrex').project))).toThrow(/Game Boy/);
+  });
+
+  it('round-trips a game boy song through LSDJ .sav encode/decode', () => {
+    const state = enterNote(newSession('gameboy'), 60);
+    const song = songForRender(state.project);
+    song.tempo = 145;
+    song.patterns[0].rows[0][0] = {
+      ...song.patterns[0].rows[0][0],
+      effect: { cmd: 'C', value: 0x37 },
+    };
+    const bytes = encodeLsdjSav(song);
+    const decoded = decodeLsdjSav(bytes);
+    expect(decoded.song.chip).toBe('gameboy');
+    expect(decoded.song.tempo).toBe(145);
+    expect(decoded.song.order.length).toBeGreaterThanOrEqual(1);
+    expect(decoded.song.patterns[0].rows[0][0].note).toBe(60);
+    expect(decoded.song.patterns[0].rows[0][0].effect).toEqual({ cmd: 'C', value: 0x37 });
+    expect(decoded.warnings.some((warning) => /tables|kits|speech/i.test(warning))).toBe(true);
+    const project = projectFromLsdjDecode(decoded, 'cart');
+    expect(project.chip).toBe('gameboy');
+    expect(project.name).toBe('cart');
+    expect(project.songs[0].tempo).toBe(145);
+  });
+
+  it('decodes an empty LSDJ .sav work song into a blank game boy project', () => {
+    const blank = songForRender(newProject('gameboy'));
+    const bytes = encodeLsdjSav(blank);
+    const decoded = decodeLsdjSav(bytes);
+    expect(decoded.song.chip).toBe('gameboy');
+    expect(decoded.song.order.length).toBe(1);
+    expect(decoded.song.patterns[0].rows.every((row) => row.every((cell) => cell.note === null))).toBe(true);
+    expect(decoded.song.instruments.length).toBeGreaterThanOrEqual(1);
+    expect(() => decodeLsdjSav(bytes.subarray(0, 32))).toThrow(/must be/);
+  });
+
+  it('decodes the vendored empty LSDJ template padded to a full .sav', () => {
+    const bytes = new Uint8Array(LSDJ_SAV_SIZE);
+    bytes.set(createEmptyLsdjSong(), 0);
+    // Minimal file-memory init marker used by export.
+    bytes[0x8000 + 0x13e] = 0x6a;
+    bytes[0x8000 + 0x13f] = 0x6b;
+    const decoded = decodeLsdjSav(bytes);
+    expect(decoded.song.chip).toBe('gameboy');
+    expect(decoded.song.order.length).toBe(1);
+    expect(decoded.song.instruments.length).toBeGreaterThanOrEqual(1);
+    expect(decoded.warnings.length).toBeGreaterThan(0);
   });
 
   it('exports ym and aky for vectrex', () => {

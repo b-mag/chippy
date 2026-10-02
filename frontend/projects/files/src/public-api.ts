@@ -9,7 +9,13 @@ export { encodeYm6, parseYm, unwrapYmPayload, type ParsedYm } from './lib/ym6';
 export { encodeVgm } from './lib/vgm';
 export { a4Hz, a4Period, encodeWav, renderPcm } from './lib/pcm';
 export { AkyUnsupportedError, encodeAky } from './lib/aky';
-export { encodeLsdjSav, LSDJ_SAV_SIZE } from './lib/lsdj-sav';
+export {
+  decodeLsdjSav,
+  encodeLsdjSav,
+  projectFromLsdjDecode,
+  LSDJ_SAV_SIZE,
+  type LsdjDecodeResult,
+} from './lib/lsdj-sav';
 
 import { renderSong } from '@chippy/engines';
 import { chipDefinition, type Song } from '@chippy/domain';

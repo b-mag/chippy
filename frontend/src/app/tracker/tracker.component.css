@@ -1,5 +1,22 @@
 :host { display: block; height: 100%; min-height: 0; }
 
+.mobile-tracker-gate {
+  display: grid;
+  place-items: center;
+  min-height: 60vh;
+  padding: 2rem 1.25rem;
+  text-align: center;
+}
+
+.mobile-tracker-gate p {
+  margin: 0;
+  max-width: 22rem;
+  font-size: 1.05rem;
+  line-height: 1.45;
+  color: var(--ink, #f5f0ff);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+}
+
 .workspace {
   display: grid;
   grid-template-columns: 14rem minmax(0, 1fr) max-content;
@@ -42,8 +59,13 @@
 .btn-loop { min-width: 7.5rem; }
 .btn-undo, .btn-redo { min-width: 4.5rem; }
 .btn-save, .btn-open { min-width: 7.5rem; }
-.btn-mute { min-width: 4.8rem; }
-.btn-solo { min-width: 4.8rem; }
+.btn-mute,
+.btn-solo {
+  min-width: 0;
+  padding-left: 6px;
+  padding-right: 6px;
+  font-size: 0.8rem;
+}
 
 .open-project-input {
   position: absolute;
@@ -233,9 +255,17 @@
   margin: 0;
 }
 
+/* Same 4-track grid as .channel-cells so N/I/V/FX sit over their columns. */
+.column-keys,
+.channel-cells {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .column-keys {
-  display: flex;
-  gap: 4px;
   font-family: ui-monospace, monospace;
   font-size: 0.7rem;
   opacity: 0.65;
@@ -243,9 +273,8 @@
 }
 
 .column-keys span {
-  flex: 1;
   text-align: center;
-  min-width: 2.6rem;
+  min-width: 0;
 }
 
 .order-list {
@@ -335,16 +364,20 @@
 }
 
 /*
- * One track per channel, floored at the width of the four cells, so the header
- * and the rows stay aligned and wide chips scroll instead of crushing columns.
+ * Fixed channel width (not 1fr): growing to fill the Pattern panel hid earlier
+ * “narrower” tweaks. 8rem ≈ 30% under the old 11.25rem floor.
  */
 .grid-head, .grid-row {
   display: grid;
-  grid-template-columns: 2rem repeat(var(--channels, 4), minmax(11.25rem, 1fr));
-  gap: 6px;
-  align-items: center;
-  min-width: max-content;
+  grid-template-columns: 2rem repeat(var(--channels, 4), 14rem);
+  gap: 8px;
+  width: max-content;
+  max-width: 100%;
 }
+
+/* Keep N/I/V/FX flush above the cells even when channel titles wrap. */
+.grid-head { align-items: end; }
+.grid-row { align-items: center; }
 
 .channel-head {
   display: flex;
@@ -354,16 +387,26 @@
   min-width: 0;
 }
 
+/* Vertical rule between channels (header + cells share the same inset). */
+.channel-head + .channel-head,
+.channel-cells + .channel-cells {
+  border-left: 1px solid var(--cell-edge);
+  padding-left: 8px;
+  margin-left: 2px;
+}
+
 .channel-toggles {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4px;
 }
 
-.channel-cells { display: flex; gap: 4px; }
-
 .cell {
-  min-width: 2.6rem;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 2px;
+  font-size: 0.8rem;
   font-family: ui-monospace, monospace;
   background: var(--cell);
   color: var(--ink);
