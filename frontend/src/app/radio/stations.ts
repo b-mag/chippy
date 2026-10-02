@@ -29,9 +29,8 @@ export const RADIO_STATIONS: readonly RadioStation[] = [
     id: 'cvgm',
     label: 'CVGM',
     shortLabel: 'CVGM',
-    // Upstream is HTTP-only Icecast; works on localhost HTTP. HTTPS pages
-    // block mixed content — player reports that clearly on failure.
-    url: 'http://stream.cvgm.net:8000/cvgm128.ogg',
+    // Master mount on slacker.cvgm.net (HTTPS). Legacy stream.cvgm.net:8000 is HTTP-only.
+    url: 'https://slacker.cvgm.net/cvgm128.ogg',
     homepage: 'https://www.cvgm.net/',
     cors: true,
   },

@@ -87,12 +87,19 @@ export class RadioPlayerService {
     if (!station.cors) {
       return false;
     }
+    // Mixed-content blocks crossOrigin wiring for plain HTTP mounts on HTTPS pages.
     if (typeof location !== 'undefined'
       && location.protocol === 'https:'
       && station.url.startsWith('http:')) {
       return false;
     }
     return true;
+  }
+
+  private streamBlockedByMixedContent(station: RadioStation): boolean {
+    return typeof location !== 'undefined'
+      && location.protocol === 'https:'
+      && station.url.startsWith('http:');
   }
 
   /**
@@ -103,9 +110,7 @@ export class RadioPlayerService {
     const station = this.station();
     const cors = this.usesCors(station);
 
-    if (typeof location !== 'undefined'
-      && location.protocol === 'https:'
-      && station.url.startsWith('http:')) {
+    if (this.streamBlockedByMixedContent(station)) {
       this.playing.set(false);
       this.vizEnabled.set(false);
       this.status.set('Signal lost · station is HTTP-only (use localhost HTTP or an HTTPS relay)');
