@@ -14,7 +14,10 @@ import {
   exportWav,
   exportYm,
   instrumentDownloadName,
+  LSDJ_GREENFIELD_FORMAT_VERSION,
   LSDJ_SAV_SIZE,
+  lsdjImportMapAligned,
+  lsdjSavCompatibilityStatus,
   parseInstrumentFile,
   parseProject,
   parseYm,
@@ -25,6 +28,39 @@ import {
   unwrapYmPayload,
 } from '@chippy/files';
 import { createEmptyLsdjSong } from './lib/lsdj-empty-song';
+
+function sliceEqual(a: Uint8Array, b: Uint8Array, start: number, length: number): boolean {
+  for (let i = 0; i < length; i += 1) {
+    if (a[start + i] !== b[start + i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Greenfield song dirtied with chain transpose, grooves, format, and file-slot markers. */
+function dirtyLsdjSavFixture(): Uint8Array {
+  const state = enterNote(newSession('gameboy'), 60);
+  const song = songForRender(state.project);
+  song.tempo = 145;
+  song.patterns[0].rows[0][0] = {
+    ...song.patterns[0].rows[0][0],
+    effect: { cmd: 'C', value: 0x37 },
+  };
+  const bytes = encodeLsdjSav(song);
+  // Non-default groove 0
+  bytes[0x1090] = 5;
+  bytes[0x1091] = 7;
+  // Chain 0 step 0 transpose +12 (PU1); phrase note stays 60, heard as 72 after import
+  bytes[0x2880] = 12;
+  // Format version 9 (opened-cart style)
+  bytes[0x7fff] = 9;
+  // File-slot project name marker in upper 96KB
+  bytes[0x8000] = 0x41; // 'A'
+  // Table envelope marker (non-zero) so preserve can be asserted
+  bytes[0x1690] = 0xab;
+  return bytes;
+}
 
 describe('project file', () => {
   it('round-trips a project, migrates v1, and rejects unknown fields', () => {
@@ -266,6 +302,68 @@ describe('export helpers', () => {
     expect(decoded.song.order.length).toBe(1);
     expect(decoded.song.instruments.length).toBeGreaterThanOrEqual(1);
     expect(decoded.warnings.length).toBeGreaterThan(0);
+    expect(decoded.formatVersion).toBe(LSDJ_GREENFIELD_FORMAT_VERSION);
+    expect(decoded.importMap.channelPhrases).toHaveLength(4);
+  });
+
+  it('no-edit re-export of an opened .sav is byte-identical (identity invariant)', () => {
+    const original = dirtyLsdjSavFixture();
+    const decoded = decodeLsdjSav(original);
+    expect(decoded.formatVersion).toBe(9);
+    const exported = encodeLsdjSav(decoded.song, {
+      baseSav: original,
+      importMap: decoded.importMap,
+      modified: false,
+    });
+    expect(exported).toEqual(original);
+  });
+
+  it('patch-in-place preserves chains/grooves/tables/file slots when editing', () => {
+    const original = dirtyLsdjSavFixture();
+    const decoded = decodeLsdjSav(original);
+    expect(decoded.song.patterns[0].rows[0][0].note).toBe(72); // 60 + transpose 12
+    decoded.song.patterns[0].rows[0][0] = {
+      ...decoded.song.patterns[0].rows[0][0],
+      note: 64,
+      effect: { cmd: 'C', value: 0x11 },
+    };
+    decoded.song.tempo = 160;
+    const exported = encodeLsdjSav(decoded.song, {
+      baseSav: original,
+      importMap: decoded.importMap,
+      modified: true,
+    });
+    expect(exported).not.toEqual(original);
+    // Structure + unsupported regions unchanged
+    expect(sliceEqual(exported, original, 0x1290, 1024)).toBe(true); // sequence
+    expect(sliceEqual(exported, original, 0x2080, 0x800)).toBe(true); // chain phrases
+    expect(sliceEqual(exported, original, 0x2880, 0x800)).toBe(true); // chain transposes
+    expect(sliceEqual(exported, original, 0x3e82, 32)).toBe(true); // phrase alloc
+    expect(sliceEqual(exported, original, 0x3ea2, 16)).toBe(true); // chain alloc
+    expect(exported[0x1090]).toBe(5);
+    expect(exported[0x1091]).toBe(7);
+    expect(exported[0x1690]).toBe(0xab);
+    expect(exported[0x7fff]).toBe(9);
+    expect(exported[0x8000]).toBe(0x41);
+    // Phrase note stored without transpose: 64 - 12 = 52
+    expect(exported[0x0000]).toBe(52);
+    expect(exported[0x4000]).toBe(2); // C
+    expect(exported[0x4ff0]).toBe(0x11);
+    expect(exported[0x3fb4]).toBe(160);
+    expect(lsdjImportMapAligned(decoded.song, decoded.importMap)).toBe(true);
+  });
+
+  it('reports LSDJ compatibility status for greenfield vs opened .sav', () => {
+    const green = lsdjSavCompatibilityStatus({ baseSav: null });
+    expect(green).toMatch(/Greenfield/i);
+    expect(green).toMatch(/Still missing/i);
+    const opened = lsdjSavCompatibilityStatus({
+      baseSav: dirtyLsdjSavFixture(),
+      structurePreserved: true,
+    });
+    expect(opened).toMatch(/Round-trip/i);
+    expect(opened).toMatch(/preserved/i);
+    expect(opened).toMatch(/Chains UI/i);
   });
 
   it('exports ym and aky for vectrex', () => {

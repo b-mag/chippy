@@ -7,6 +7,8 @@ import {
   type EffectCmd,
   type Instrument,
   type InstrumentKind,
+  type LsdjImportMap,
+  type LsdjPhraseRef,
   type Pattern,
   type Project,
   type Song,
@@ -14,10 +16,18 @@ import {
 import { WAVEFORMS } from '@chippy/engines';
 import { createEmptyLsdjSong } from './lsdj-empty-song';
 
+export type { LsdjImportMap, LsdjPhraseRef };
+
 /** Full LSDJ .sav size (128 KiB). */
 export const LSDJ_SAV_SIZE = 0x20000;
+/** Format version of the vendored empty work-song template (libLSDJ). */
+export const LSDJ_GREENFIELD_FORMAT_VERSION = 7;
+/** Lowest format version Chippy accepts without a hard reject. */
+export const LSDJ_FORMAT_VERSION_MIN = 5;
+/** Highest format version Chippy treats as known; newer still imports with a warning. */
+export const LSDJ_FORMAT_VERSION_MAX = 16;
+
 const SONG_SIZE = 0x8000;
-const BLOCK_SIZE = 0x200;
 const BLOCK_COUNT = 191;
 const PROJECT_COUNT = 32;
 const PROJECT_NAME_LENGTH = 8;
@@ -100,10 +110,25 @@ const LSDJ_BYTE_TO_CMD: Record<number, EffectCmd> = {
   23: 'B',
 };
 
+/** Options for `.sav` export. */
+export interface LsdjEncodeOptions {
+  /** Original opened `.sav`; enables patch-in-place preserve mode. */
+  baseSav?: Uint8Array | null;
+  /** Phrase/instrument map from decode; required with baseSav for phrase patches. */
+  importMap?: LsdjImportMap | null;
+  /**
+   * False when the user has not changed the project since opening the `.sav`.
+   * With baseSav, encode returns a byte-identical clone (identity invariant).
+   */
+  modified?: boolean;
+}
+
 /** Result of opening an LSDJ `.sav` into Chippy's flat Song model. */
 export interface LsdjDecodeResult {
   song: Song;
   warnings: string[];
+  formatVersion: number;
+  importMap: LsdjImportMap;
 }
 
 function setBit(table: Uint8Array, index: number): void {
@@ -225,10 +250,15 @@ function writePhrase(
   phrase: number,
   cells: Cell[],
   instrumentIndex: (id: string | null) => number,
+  transpose = 0,
+  touchAlloc = true,
 ): void {
   for (let step = 0; step < PHRASE_LENGTH; step += 1) {
     const cell = cells[step] ?? { note: null, cut: false, instrumentId: null, volume: null, effect: null };
-    const note = cell.cut || cell.note === null ? NO_NOTE : Math.min(127, Math.max(1, Math.round(cell.note)));
+    let note = NO_NOTE;
+    if (!cell.cut && cell.note !== null) {
+      note = Math.min(127, Math.max(1, Math.round(cell.note - transpose)));
+    }
     song[OFF.phraseNotes + phrase * PHRASE_LENGTH + step] = note;
     const instr = cell.note !== null && !cell.cut ? instrumentIndex(cell.instrumentId) : NO_INSTRUMENT;
     song[OFF.phraseInstruments + phrase * PHRASE_LENGTH + step] = instr & 0xff;
@@ -236,7 +266,9 @@ function writePhrase(
     song[OFF.phraseCommands + phrase * PHRASE_LENGTH + step] = cmd;
     song[OFF.phraseCommandValues + phrase * PHRASE_LENGTH + step] = value;
   }
-  setBit(song.subarray(OFF.phraseAlloc, OFF.phraseAlloc + 32), phrase);
+  if (touchAlloc) {
+    setBit(song.subarray(OFF.phraseAlloc, OFF.phraseAlloc + 32), phrase);
+  }
 }
 
 function writeChain(song: Uint8Array, chain: number, phrases: number[]): void {
@@ -272,30 +304,34 @@ function buildFileMemory(): Uint8Array {
   return file;
 }
 
-/**
- * Map a Chippy Game Boy song into an LSDJ-compatible 128 KiB .sav
- * (work memory + empty file slots).
- */
-export function encodeLsdjSav(song: Song): Uint8Array {
-  if (song.chip !== 'gameboy') {
-    throw new Error('LSDJ SAV export is for the Game Boy.');
-  }
+function instrumentIndexLookup(instruments: Instrument[]): (id: string | null) => number {
+  const instrumentIds = new Map<string, number>();
+  instruments.forEach((instrument, index) => {
+    const match = /^ins-(\d+)$/.exec(instrument.id);
+    if (match) {
+      instrumentIds.set(instrument.id, Number(match[1]) - 1);
+    } else {
+      instrumentIds.set(instrument.id, index);
+    }
+  });
+  return (id: string | null): number => {
+    if (!id) {
+      return instruments.length > 0 ? (instrumentIds.get(instruments[0].id) ?? 0) : NO_INSTRUMENT;
+    }
+    return instrumentIds.get(id) ?? 0;
+  };
+}
+
+function encodeGreenfield(song: Song): Uint8Array {
   const songBytes = createEmptyLsdjSong();
   setTempo(songBytes, song.tempo);
   writeWaveforms(songBytes);
 
   const instruments = song.instruments.slice(0, MAX_INSTRUMENTS);
-  const instrumentIds = new Map<string, number>();
   instruments.forEach((instrument, index) => {
-    instrumentIds.set(instrument.id, index);
     writeInstrument(songBytes, index, instrument);
   });
-  const instrumentIndex = (id: string | null): number => {
-    if (!id) {
-      return instruments.length > 0 ? 0 : NO_INSTRUMENT;
-    }
-    return instrumentIds.get(id) ?? 0;
-  };
+  const instrumentIndex = instrumentIndexLookup(instruments);
 
   const channelCount = 4;
   let nextPhrase = 0;
@@ -319,7 +355,6 @@ export function encodeLsdjSav(song: Song): Uint8Array {
       phraseList.push(nextPhrase);
       nextPhrase += 1;
     }
-    // Chunk phrases into chains of 16.
     for (let i = 0; i < phraseList.length; i += CHAIN_LENGTH) {
       if (nextChain >= MAX_CHAINS) {
         throw new Error(`Song is too large for LSDJ (more than ${MAX_CHAINS} chains).`);
@@ -348,9 +383,8 @@ export function encodeLsdjSav(song: Song): Uint8Array {
     }
   }
 
-  // Ensure init markers remain intact.
-  songBytes[OFF.rb1] = 0x72; // 'r'
-  songBytes[OFF.rb1 + 1] = 0x62; // 'b'
+  songBytes[OFF.rb1] = 0x72;
+  songBytes[OFF.rb1 + 1] = 0x62;
   songBytes[OFF.rb2] = 0x72;
   songBytes[OFF.rb2 + 1] = 0x62;
   songBytes[OFF.rb3] = 0x72;
@@ -360,6 +394,93 @@ export function encodeLsdjSav(song: Song): Uint8Array {
   sav.set(songBytes, 0);
   sav.set(buildFileMemory(), SONG_SIZE);
   return sav;
+}
+
+function encodePatchInPlace(
+  song: Song,
+  baseSav: Uint8Array,
+  importMap: LsdjImportMap,
+): Uint8Array {
+  if (baseSav.length !== LSDJ_SAV_SIZE) {
+    throw new Error(`LSDJ base .sav must be ${LSDJ_SAV_SIZE} bytes (got ${baseSav.length}).`);
+  }
+  const sav = new Uint8Array(baseSav);
+  const songBytes = sav.subarray(0, SONG_SIZE);
+  if (readTempo(songBytes) !== Math.min(295, Math.max(40, Math.round(song.tempo)))) {
+    setTempo(songBytes, song.tempo);
+  }
+
+  const instrumentIndex = instrumentIndexLookup(song.instruments);
+
+  const orderLen = song.order.length;
+  for (let channel = 0; channel < 4; channel += 1) {
+    const refs = importMap.channelPhrases[channel] ?? [];
+    const limit = Math.min(orderLen, refs.length);
+    for (let orderIndex = 0; orderIndex < limit; orderIndex += 1) {
+      const ref = refs[orderIndex];
+      if (!ref) {
+        continue;
+      }
+      const patternId = song.order[orderIndex];
+      const pattern = song.patterns.find((item) => item.id === patternId);
+      if (!pattern) {
+        continue;
+      }
+      const cells: Cell[] = pattern.rows.map((row) => row[channel] ?? {
+        note: null, cut: false, instrumentId: null, volume: null, effect: null,
+      });
+      writePhrase(songBytes, ref.phrase, cells, instrumentIndex, ref.transpose, false);
+    }
+  }
+
+  return sav;
+}
+
+/**
+ * Map a Chippy Game Boy song into an LSDJ-compatible 128 KiB .sav.
+ * With baseSav + importMap, patches in place so unsupported structure is preserved.
+ * With baseSav and modified === false, returns a byte-identical clone (identity invariant).
+ */
+export function encodeLsdjSav(song: Song, options?: LsdjEncodeOptions): Uint8Array {
+  if (song.chip !== 'gameboy') {
+    throw new Error('LSDJ SAV export is for the Game Boy.');
+  }
+  const baseSav = options?.baseSav ?? null;
+  const importMap = options?.importMap ?? null;
+  if (baseSav) {
+    if (options?.modified === false) {
+      if (baseSav.length !== LSDJ_SAV_SIZE) {
+        throw new Error(`LSDJ base .sav must be ${LSDJ_SAV_SIZE} bytes (got ${baseSav.length}).`);
+      }
+      return new Uint8Array(baseSav);
+    }
+    if (!importMap) {
+      throw new Error('LSDJ patch-in-place export requires the import map from decode.');
+    }
+    return encodePatchInPlace(song, baseSav, importMap);
+  }
+  return encodeGreenfield(song);
+}
+
+/**
+ * Honesty status for `.sav` export until full LSDJ compatibility ships.
+ */
+export function lsdjSavCompatibilityStatus(options?: {
+  baseSav?: Uint8Array | null;
+  structurePreserved?: boolean;
+}): string {
+  const hasBase = Boolean(options?.baseSav && options.baseSav.length === LSDJ_SAV_SIZE);
+  const preserved = options?.structurePreserved !== false && hasBase;
+  const works =
+    'Works now: phrase notes/FX Chippy knows, pulse/wave/noise instruments Chippy edits, tempo, .sav open/export.';
+  const mode = hasBase
+    ? preserved
+      ? 'Round-trip: chain layout, tables, grooves, kits, speech, wave bank, and file slots from the opened .sav are preserved on re-export. Chippy still edits a flattened Song Order view.'
+      : 'Round-trip: opened .sav base is kept, but Song Order no longer fully aligns with the import map — chain slots that still map were patched; unmapped Chippy-only rows were not written into the hierarchy.'
+    : 'Greenfield: new export builds synthetic chains from Song Order; no tables, grooves, kits, speech, or file slots.';
+  const missing =
+    'Still missing for full editability: Chains UI, Tables (A), Grooves (G), Synth/wave editor (F), Kits, Speech, File slots /.lsdsng, and engine preview gaps for deferred cmds.';
+  return `${works} ${mode} ${missing}`;
 }
 
 function readName(source: Uint8Array, offset: number, length: number): string {
@@ -421,8 +542,14 @@ function readNoiseFields(bytes: Uint8Array): Partial<Instrument> {
   };
 }
 
-function readInstruments(song: Uint8Array, warnings: string[]): Instrument[] {
+interface InstrumentReadResult {
+  instruments: Instrument[];
+  editableInstruments: number[];
+}
+
+function readInstruments(song: Uint8Array, warnings: string[]): InstrumentReadResult {
   const instruments: Instrument[] = [];
+  const editableInstruments: number[] = [];
   let sawKit = false;
   let sawTable = false;
   for (let index = 0; index < MAX_INSTRUMENTS; index += 1) {
@@ -440,15 +567,18 @@ function readInstruments(song: Uint8Array, warnings: string[]): Instrument[] {
     if (type === 1) {
       kind = 'wave';
       fields = readWaveFields(bytes);
+      editableInstruments.push(index);
     } else if (type === 3) {
       kind = 'noise';
       fields = readNoiseFields(bytes);
+      editableInstruments.push(index);
     } else if (type === 2) {
       sawKit = true;
       kind = 'pulse';
       fields = { ...readPulseFields(bytes), kind: 'pulse' };
     } else if (type === 0) {
       fields = readPulseFields(bytes);
+      editableInstruments.push(index);
     } else {
       warnings.push(`Instrument ${index} has unsupported type ${type}; imported as pulse.`);
       fields = readPulseFields(bytes);
@@ -471,7 +601,7 @@ function readInstruments(song: Uint8Array, warnings: string[]): Instrument[] {
   if (instruments.length === 0) {
     instruments.push(baseInstrument({ id: 'ins-1', name: 'Pulse', kind: 'pulse' }));
   }
-  return instruments;
+  return { instruments, editableInstruments };
 }
 
 function instrumentIdForIndex(instruments: Instrument[], index: number): string | null {
@@ -519,13 +649,8 @@ function readPhraseCells(
   return cells;
 }
 
-interface PhraseRef {
-  phrase: number;
-  transpose: number;
-}
-
-function expandChannelPhrases(song: Uint8Array, channel: number): PhraseRef[] {
-  const list: PhraseRef[] = [];
+function expandChannelPhrases(song: Uint8Array, channel: number): LsdjPhraseRef[] {
+  const list: LsdjPhraseRef[] = [];
   for (let row = 0; row < MAX_SEQUENCE_ROWS; row += 1) {
     const chain = song[OFF.sequence + row * 4 + channel];
     if (chain === NO_CHAIN) {
@@ -552,7 +677,6 @@ function expandChannelPhrases(song: Uint8Array, channel: number): PhraseRef[] {
 }
 
 function groovesAreDefault(song: Uint8Array): boolean {
-  // Groove 0 default ticks 6,6 then zeros; other grooves typically unused (zeros).
   if (song[OFF.grooves] !== 6 || song[OFF.grooves + 1] !== 6) {
     return false;
   }
@@ -583,6 +707,7 @@ function fileSlotsLookUsed(sav: Uint8Array): boolean {
 /**
  * Flatten an LSDJ 128 KiB `.sav` work song into Chippy's Game Boy Song
  * (chains → unique patterns in Song Order). Unsupported structures become warnings.
+ * Returns an importMap so re-export can patch phrase slots in place.
  */
 export function decodeLsdjSav(bytes: Uint8Array): LsdjDecodeResult {
   if (bytes.length !== LSDJ_SAV_SIZE) {
@@ -590,6 +715,7 @@ export function decodeLsdjSav(bytes: Uint8Array): LsdjDecodeResult {
   }
   const songBytes = bytes.subarray(0, SONG_SIZE);
   const warnings: string[] = [];
+  const formatVersion = songBytes[OFF.formatVersion];
 
   if (
     songBytes[OFF.rb1] !== 0x72 || songBytes[OFF.rb1 + 1] !== 0x62
@@ -598,13 +724,24 @@ export function decodeLsdjSav(bytes: Uint8Array): LsdjDecodeResult {
   ) {
     warnings.push('Work-song init markers look unusual; import may be incomplete.');
   }
+  if (formatVersion < LSDJ_FORMAT_VERSION_MIN || formatVersion > LSDJ_FORMAT_VERSION_MAX) {
+    warnings.push(
+      `Song format version ${formatVersion} is outside Chippy's known band `
+      + `(${LSDJ_FORMAT_VERSION_MIN}–${LSDJ_FORMAT_VERSION_MAX}); import may be incomplete.`,
+    );
+  } else if (formatVersion !== LSDJ_GREENFIELD_FORMAT_VERSION) {
+    warnings.push(
+      `Song format version ${formatVersion} (Chippy greenfield exports use ${LSDJ_GREENFIELD_FORMAT_VERSION}). `
+      + 'Re-export preserves the opened format version.',
+    );
+  }
 
-  const instruments = readInstruments(songBytes, warnings);
+  const { instruments, editableInstruments } = readInstruments(songBytes, warnings);
   if (!groovesAreDefault(songBytes)) {
-    warnings.push('Grooves are not in Chippy yet; non-default grooves were ignored.');
+    warnings.push('Grooves are not in Chippy yet; non-default grooves were ignored for editing (preserved on re-export).');
   }
   if (fileSlotsLookUsed(bytes)) {
-    warnings.push('File slots / .lsdsng projects in the upper 96KB were not imported.');
+    warnings.push('File slots / .lsdsng projects in the upper 96KB are not editable in Chippy yet (preserved on re-export).');
   }
 
   const channelPhrases = [0, 1, 2, 3].map((channel) => expandChannelPhrases(songBytes, channel));
@@ -651,19 +788,22 @@ export function decodeLsdjSav(bytes: Uint8Array): LsdjDecodeResult {
   }
 
   if (sharedPhrase) {
-    warnings.push('Shared phrases were expanded into unique patterns (chain hierarchy is flattened).');
+    warnings.push(
+      'Shared phrases were expanded into unique patterns for editing; re-export patches the shared phrase slot (last mapped pattern wins).',
+    );
   }
   if (nonZeroTranspose) {
-    warnings.push('Chain transpose was baked into notes; re-export will not restore transpose.');
+    warnings.push(
+      'Chain transpose was baked into notes for editing; re-export restores transpose via patch-in-place.',
+    );
   }
   if (unknownCmds.size > 0) {
     warnings.push(
       `Unknown phrase command byte(s) skipped: ${[...unknownCmds].map((b) => b.toString(16).padStart(2, '0')).join(', ')}.`,
     );
   }
-  warnings.push('Tables, kits, speech, and softsynth details are not imported yet.');
+  warnings.push('Tables, kits, speech, and softsynth details are not editable in Chippy yet (preserved on re-export).');
 
-  // Deduplicate the always-on catch-all if nothing else was flagged about those areas.
   const uniqueWarnings = [...new Set(warnings)];
 
   const song: Song = {
@@ -675,7 +815,12 @@ export function decodeLsdjSav(bytes: Uint8Array): LsdjDecodeResult {
     instruments,
     armedInstrumentId: instruments[0].id,
   };
-  return { song, warnings: uniqueWarnings };
+  return {
+    song,
+    warnings: uniqueWarnings,
+    formatVersion,
+    importMap: { channelPhrases, editableInstruments },
+  };
 }
 
 /** Wrap a decoded LSDJ song into a Chippy Project for session.load. */
@@ -697,4 +842,13 @@ export function projectFromLsdjDecode(result: LsdjDecodeResult, projectName = 'L
     activeSongId: body.id,
     customPresets: [],
   };
+}
+
+/** True when Song Order length still aligns with the import map on every channel. */
+export function lsdjImportMapAligned(song: Song, importMap: LsdjImportMap | null | undefined): boolean {
+  if (!importMap) {
+    return false;
+  }
+  const orderLen = song.order.length;
+  return importMap.channelPhrases.every((refs) => refs.length === orderLen);
 }

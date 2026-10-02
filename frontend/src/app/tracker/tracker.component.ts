@@ -852,16 +852,21 @@ export class TrackerComponent {
         const project = files.projectFromLsdjDecode(decoded, projectName);
         this.playback.stop();
         this.session.load(project);
+        this.session.setLsdjOverlay(buffer, decoded.importMap);
         const detail = decoded.warnings.length > 0
           ? ` ${decoded.warnings.join(' ')}`
           : '';
-        this.status.set(`Opened LSDJ .sav (Game Boy). Chains flattened into Song Order.${detail}`);
+        this.status.set(
+          `Opened LSDJ .sav (Game Boy, format v${decoded.formatVersion}). `
+          + `Chains flattened into Song Order for editing; re-export patches in place.${detail}`,
+        );
         return;
       }
       const text = await file.text();
       const project = files.parseProject(text);
       this.playback.stop();
       this.session.load(project);
+      this.session.clearLsdjOverlay();
       this.status.set('Opened project.');
     } catch (error) {
       this.status.set(error instanceof Error ? error.message : 'That file was rejected.');
@@ -905,15 +910,24 @@ export class TrackerComponent {
       const files = await import('@chippy/files');
       const song = this.song();
       const aky = kind === 'aky' ? files.exportAky(song) : null;
+      const baseSav = this.session.lsdjSavBase();
+      const importMap = this.session.lsdjImportMap();
       const bundles = kind === 'wav' ? [files.exportWav(song)]
         : kind === 'ym' ? [files.exportYm(song)]
         : kind === 'vgm' ? [files.exportVgm(song)]
-        : kind === 'sav' ? [files.exportLsdjSav(song)]
+        : kind === 'sav' ? [files.exportLsdjSav(song, {
+          baseSav,
+          importMap,
+          modified: this.state().dirty,
+        })]
         : [aky!.songFile, aky!.configFile];
       bundles.forEach((bundle) => this.download(bundle.bytes, bundle.filename, bundle.mime));
       this.status.set(
         kind === 'sav'
-          ? 'LSDJ .sav ready — chains are synthetic from Song Order; tables, grooves, kits, and speech are not in Chippy yet.'
+          ? files.lsdjSavCompatibilityStatus({
+            baseSav,
+            structurePreserved: files.lsdjImportMapAligned(song, importMap),
+          })
           : 'Export ready.',
       );
     } catch (error) {

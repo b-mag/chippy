@@ -16,25 +16,30 @@ A real mobile tracker remains backlog if Brandon wants it later:
 
 ## LSDJ gaps
 
-Game Boy mode ships **LSDJ phrase FX**, **`.sav` export** (synthetic chains from flat Song Order), and **`.sav` import** that flattens chains → Song Order (lossy for shared phrases / transpose). The niche that cares most is people who already write on a physical Game Boy + flash cart and want Chippy as a second editor.
+Game Boy mode ships **LSDJ phrase FX**, **`.sav` import** (flatten chains → Song Order for editing), and **`.sav` export** (greenfield synthetic chains, or **patch-in-place** when a `.sav` was opened). The niche that cares most is people who already write on a physical Game Boy + flash cart and want Chippy as a second editor.
 
-### Next / in progress
+### Round-trip principles (standing rules)
 
-Import is the flagship path: open a cart dump, edit what Chippy can represent, export `.sav` back. Remaining work below deepens fidelity so less data is dropped.
+These are correctness requirements, not backlog items. Feature work that breaks them is a regression.
 
-### Then burn down
+1. **Patch-in-place** — When a `.sav` was opened, re-export must write Chippy-owned edits into the original phrase/tempo slots and **never rebuild** sequence, chains, allocations, tables, grooves, wave bank, kits/speech bytes, or file slots from the flattened Song Order. Synthetic chain rebuild from Song Order is allowed **only** for greenfield Chippy→`.sav` exports (no opened base).
+2. **Identity invariant** — Import `.sav` → make **no** modifications in Chippy → export `.sav` must be **byte-for-byte identical** to the file that was opened (128 KiB), regardless of which LSDJ features Chippy can edit or preview today.
 
-1. **Chains UI** — real chain/phrase hierarchy (import + edit, not only synthetic export / flattened import)
+### Burn down (editability)
+
+Preserve-on-reexport and format-version reporting are in place. Remaining work deepens what Chippy can *edit*, not whether unsupported data survives the trip:
+
+1. **Chains UI** — real chain/phrase hierarchy (edit shared phrases / transpose in Chippy, not only flattened view + patch-in-place)
 2. **Tables** — editor + alloc; unlocks `A` and table-driven timbre from imported saves
 3. **Grooves** — beyond default `6,6`; unlocks `G` from imported saves
 4. **Synth / wave frames** — softsynth + wave bank; deeper `F` / wave instruments from saves
-5. **Kit instruments** — kits, kit note names, kit-specific `S`
+5. **Kit instruments** — kits, kit note names, kit-specific `S` (bytes are preserved today; not editable as kits)
 6. **Speech instrument** — words / allophones
 7. **File slots / `.lsdsng`** — read/write compressed projects in the upper 96KB; multi-song from one cart dump
 8. **Arduinoboy commands** — **Ask Brandon before implementing.** Do not add `N` / `X` / `Q` / `Y` until he confirms he wants sync/hardware support.
 9. **Engine preview gaps** — keep honest any phrase command that exports/imports but is still approximate in Web Audio (`A` / `G` / deep `F` today; `B` vibrato semantics)
-10. **Format version targeting** — verify empty-song / import against current LSDJ 9.x ROMs; bump template as needed
-11. **Preserve unknown bytes** — on import→edit→export, avoid clobbering unsupported regions when possible
+10. **Greenfield empty-song bump** — vendored work-song template is still libLSDJ format **v7** (LSDJ 9.x loads it). When a verified LSDJ 9.x empty dump is available, replace the template; opened saves already keep their own format version on patch-in-place re-export.
+11. **Instrument merge on preserve path** — write Chippy pulse/wave/noise field edits back into opened `.sav` instrument slots without wiping table/kit bits (phrase/tempo patch-in-place ships; instrument panel edits stay local until this lands)
 
 ## More chips and tools
 
@@ -52,7 +57,7 @@ Replace auth stubs so donors get ad-free sessions and premium presets without `p
 
 ## Tracker consistency wins
 
-Shipped: richer shared FX on non-GB chips, Game Boy LSDJ FX + `.sav` export/import, Radio reconnect, CORS-gated viz, Rainwave now-playing.
+Shipped: richer shared FX on non-GB chips, Game Boy LSDJ FX + `.sav` export/import with patch-in-place preserve, Radio reconnect, CORS-gated viz, Rainwave now-playing.
 
 Still open:
 

@@ -12,15 +12,23 @@ export { AkyUnsupportedError, encodeAky } from './lib/aky';
 export {
   decodeLsdjSav,
   encodeLsdjSav,
+  lsdjImportMapAligned,
+  lsdjSavCompatibilityStatus,
   projectFromLsdjDecode,
+  LSDJ_FORMAT_VERSION_MAX,
+  LSDJ_FORMAT_VERSION_MIN,
+  LSDJ_GREENFIELD_FORMAT_VERSION,
   LSDJ_SAV_SIZE,
   type LsdjDecodeResult,
+  type LsdjEncodeOptions,
+  type LsdjImportMap,
+  type LsdjPhraseRef,
 } from './lib/lsdj-sav';
 
 import { renderSong } from '@chippy/engines';
 import { chipDefinition, type Song } from '@chippy/domain';
 import { encodeAky } from './lib/aky';
-import { encodeLsdjSav } from './lib/lsdj-sav';
+import { encodeLsdjSav, type LsdjEncodeOptions } from './lib/lsdj-sav';
 import { renderPcm, encodeWav } from './lib/pcm';
 import { encodeVgm } from './lib/vgm';
 import { encodeYm6 } from './lib/ym6';
@@ -69,10 +77,10 @@ export function exportVgm(song: Song): ExportBundle {
   };
 }
 
-export function exportLsdjSav(song: Song): ExportBundle {
+export function exportLsdjSav(song: Song, options?: LsdjEncodeOptions): ExportBundle {
   return {
     filename: `${safe(song.name)}.sav`,
-    bytes: encodeLsdjSav(song),
+    bytes: encodeLsdjSav(song, options),
     mime: 'application/octet-stream',
   };
 }

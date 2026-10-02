@@ -1,4 +1,8 @@
-/** Vendored libLSDJ empty working song (32 KiB), format version 7. */
+/**
+ * Vendored libLSDJ empty working song (32 KiB), format version 7.
+ * LSDJ 9.x still loads v7 work songs; greenfield Chippy→.sav uses this template.
+ * Opened saves keep their own format version on patch-in-place re-export.
+ */
 const EMPTY_SONG_B64 =
   'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
   'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +

@@ -131,6 +131,18 @@ const LOWER_ROW = 'zsxdcvgbhnjm';
 /** Upper keyboard row, one octave higher. Q is C. */
 const UPPER_ROW = 'q2w3er5t6y7u';
 
+/** Phrase slot mapping kept when a Game Boy `.sav` was opened (files layer fills this). */
+export interface LsdjPhraseRef {
+  phrase: number;
+  transpose: number;
+}
+
+/** Import map for patch-in-place `.sav` re-export. */
+export interface LsdjImportMap {
+  channelPhrases: LsdjPhraseRef[][];
+  editableInstruments: number[];
+}
+
 export interface SessionState {
   project: Project;
   cursor: Cursor;
@@ -138,6 +150,10 @@ export interface SessionState {
   past: Project[];
   future: Project[];
   dirty: boolean;
+  /** Full 128 KiB `.sav` from open; null when not opened from LSDJ. */
+  lsdjSavBase: Uint8Array | null;
+  /** Phrase map from decode for patch-in-place export. */
+  lsdjImportMap: LsdjImportMap | null;
 }
 
 export function formatNote(midi: number): string {
@@ -175,6 +191,33 @@ export function newSession(chip: ChipId = 'gameboy'): SessionState {
     past: [],
     future: [],
     dirty: false,
+    lsdjSavBase: null,
+    lsdjImportMap: null,
+  };
+}
+
+/** Attach an opened LSDJ `.sav` for patch-in-place re-export. */
+export function setLsdjOverlay(
+  state: SessionState,
+  savBase: Uint8Array,
+  importMap: LsdjImportMap,
+): SessionState {
+  return {
+    ...state,
+    lsdjSavBase: new Uint8Array(savBase),
+    lsdjImportMap: structuredClone(importMap),
+  };
+}
+
+/** Drop LSDJ overlay (new project, JSON open, chip change). */
+export function clearLsdjOverlay(state: SessionState): SessionState {
+  if (!state.lsdjSavBase && !state.lsdjImportMap) {
+    return state;
+  }
+  return {
+    ...state,
+    lsdjSavBase: null,
+    lsdjImportMap: null,
   };
 }
 
@@ -420,6 +463,8 @@ export function newProjectForChip(state: SessionState, chip: ChipId): SessionSta
     past: [],
     future: [],
     dirty: false,
+    lsdjSavBase: null,
+    lsdjImportMap: null,
   };
 }
 
@@ -862,6 +907,8 @@ export function replaceWithRandom(state: SessionState, seed: number, typed: stri
     past: [...state.past, state.project].slice(-100),
     future: [],
     dirty: true,
+    lsdjSavBase: null,
+    lsdjImportMap: null,
   };
 }
 
@@ -885,6 +932,9 @@ export function loadProject(state: SessionState, project: Project): SessionState
     past: [],
     future: [],
     dirty: false,
+    // JSON / non-sav loads clear the overlay; sav open re-attaches via setLsdjOverlay.
+    lsdjSavBase: null,
+    lsdjImportMap: null,
   };
 }
 

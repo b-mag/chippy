@@ -17,11 +17,13 @@ import {
   enterCut,
   enterNote,
   followPlaybackOrder,
+  clearLsdjOverlay,
   loadProject,
   markClean,
   moveCursor,
   newProjectForChip,
   newSession,
+  setLsdjOverlay,
   redo,
   removeCustomPreset,
   removeOrderEntry,
@@ -51,6 +53,7 @@ import {
   type CustomInstrumentPreset,
   type InstrumentPreset,
   type PresetRole,
+  type LsdjImportMap,
   type Project,
   type SessionState,
   type Song,
@@ -228,6 +231,23 @@ export class SessionService {
 
   load(project: Project): void {
     this.state.update((state) => loadProject(state, project));
+  }
+
+  /** Keep the opened LSDJ `.sav` for patch-in-place re-export. */
+  setLsdjOverlay(savBase: Uint8Array, importMap: LsdjImportMap): void {
+    this.state.update((state) => setLsdjOverlay(state, savBase, importMap));
+  }
+
+  clearLsdjOverlay(): void {
+    this.state.update((state) => clearLsdjOverlay(state));
+  }
+
+  lsdjSavBase(): Uint8Array | null {
+    return this.state().lsdjSavBase;
+  }
+
+  lsdjImportMap(): LsdjImportMap | null {
+    return this.state().lsdjImportMap;
   }
 
   markClean(): void {

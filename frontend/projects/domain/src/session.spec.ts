@@ -26,6 +26,7 @@ import {
   enterCut,
   enterNote,
   followPlaybackOrder,
+  clearLsdjOverlay,
   loadProject,
   loadSong,
   markClean,
@@ -33,6 +34,7 @@ import {
   newProject,
   newProjectForChip,
   newSession,
+  setLsdjOverlay,
   nextBlankPatternName,
   nextDuplicatePatternName,
   noteFromKey,
@@ -159,6 +161,27 @@ describe('session editing', () => {
     expect(loaded.project.chip).toBe('gameboy');
     expect(loaded.dirty).toBe(false);
     expect(toggleMute(songForRender(loaded.project), 0, new Set()).has(0)).toBe(true);
+  });
+
+  it('keeps LSDJ overlay until load/new project clears it', () => {
+    let state = newSession('gameboy');
+    expect(state.lsdjSavBase).toBeNull();
+    const sav = new Uint8Array(8);
+    sav[0] = 1;
+    const map = { channelPhrases: [[], [], [], []], editableInstruments: [0] };
+    state = setLsdjOverlay(state, sav, map);
+    expect(state.lsdjSavBase?.[0]).toBe(1);
+    expect(state.lsdjImportMap?.editableInstruments).toEqual([0]);
+    state = enterNote(state, 60);
+    expect(state.lsdjSavBase?.[0]).toBe(1);
+    state = clearLsdjOverlay(state);
+    expect(state.lsdjSavBase).toBeNull();
+    state = setLsdjOverlay(newSession('gameboy'), sav, map);
+    state = loadProject(state, newProject('gameboy'));
+    expect(state.lsdjSavBase).toBeNull();
+    state = setLsdjOverlay(state, sav, map);
+    state = newProjectForChip(state, 'vectrex');
+    expect(state.lsdjSavBase).toBeNull();
   });
 
   it('duplicates, renames, clears, reorders and removes patterns', () => {

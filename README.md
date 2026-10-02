@@ -19,9 +19,9 @@ A web tracker for writing Game Boy, Vectrex, C64, Atari ST, and NES chiptunes. K
 - The keyboard plays a note as you write it. Undo, mute, and solo are on that screen.
 - Vaporwave, dark, and plain paint, chosen from a Paint dropdown (defaults to vaporwave).
 - A short opening animation. Set `splashEnabled` to `false` in `frontend/public/config.json`, or `chippy.splash.enabled` in `chippy-api/src/main/resources/application.yml`.
-- Save a `.chippy.json` project (v4) and open one again. Legacy v1–v3 files migrate on open (Game Boy v3 shared FX remaps toward LSDJ commands). Open Project accepts `.chippy.json` and Game Boy **LSDJ `.sav`** (chains flatten into Song Order). YM snip parse entirely in the browser (no API required); optional server validate endpoints remain for later hardening.
+- Save a `.chippy.json` project (v4) and open one again. Legacy v1–v3 files migrate on open (Game Boy v3 shared FX remaps toward LSDJ commands). Open Project accepts `.chippy.json` and Game Boy **LSDJ `.sav`** (chains flatten into Song Order for editing; re-export patches the opened save in place). YM snip parse entirely in the browser (no API required); optional server validate endpoints remain for later hardening.
 - Create a random song after a warning and typing YES.
-- Export WAV (all chips), YM6 (Vectrex and Atari ST), Vectrex AKY, Game Boy VGM, and Game Boy **LSDJ `.sav`** (128KB flash-cart save).
+- Export WAV (all chips), YM6 (Vectrex and Atari ST), Vectrex AKY, Game Boy VGM, and Game Boy **LSDJ `.sav`** (128KB flash-cart save). Export shows an honesty status of LSDJ compatibility; opened-cart re-exports preserve unsupported structure.
 - Open a YM beside the song, play a range, and keep it as an instrument.
 - Radio tab: Rainwave Chiptunes, CVGM, and Nectarine streams; reconnect on stall; Rainwave now-playing titles when the API answers.
 - Optional Buy Me a Coffee prompt and Google AdSense slot, both off until you configure them. See [MONETIZATION_SETUP.md](MONETIZATION_SETUP.md).
@@ -29,7 +29,7 @@ A web tracker for writing Game Boy, Vectrex, C64, Atari ST, and NES chiptunes. K
 
 ## Later
 
-See [FUTURE.md](FUTURE.md) for the backlog: Chains/tables/grooves UI after LSDJ `.sav` import, mobile web tracker (Tracker tab is desktop-only for now), deeper NES/SID tools, Chippy-owned YM Radio, and real donor sign-in.
+See [FUTURE.md](FUTURE.md) for the backlog: Chains/tables/grooves *editors* (round-trip preserve already ships), mobile web tracker (Tracker tab is desktop-only for now), deeper NES/SID tools, Chippy-owned YM Radio, and real donor sign-in.
 
 ## Run it locally
 
